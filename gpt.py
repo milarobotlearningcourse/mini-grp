@@ -15,7 +15,7 @@ n_head = 3 ## Number of heads per block
 n_blocks = 3 ## Number of transformer blocks
 dropout = 0.15
 # ------------
-text_file = "dataset/goal_action_info.txt"
+text_file = "goal_action_info.txt"
 
 torch.manual_seed(1337)
 

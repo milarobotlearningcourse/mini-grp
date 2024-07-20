@@ -3,3 +3,7 @@ matplotlib
 rlds 
 dm-reverb 
 mediapy
+opencv-python ## for cv2
+tensorflow==2.15.0
+tensorflow_datasets==4.9.2
+moviepy>=1.0.3
