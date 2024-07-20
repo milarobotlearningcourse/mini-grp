@@ -4,7 +4,7 @@ from torch.nn import functional as F
 
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
-block_size = 16 # what is the maximum context length (tokenized history) for predictions?
+block_size = 32 # what is the maximum context length (tokenized history) for predictions?
 max_iters = 1000
 eval_interval = 200
 learning_rate = 3e-4
