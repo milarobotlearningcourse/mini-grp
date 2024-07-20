@@ -4,14 +4,14 @@ from torch.nn import functional as F
 
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
-block_size = 256 # what is the maximum context length for predictions?
+block_size = 256 # what is the maximum context length (tokenized history) for predictions?
 max_iters = 1000
 eval_interval = 200
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
-n_embd = 384
-n_head = 3
+n_embd = 384 ## Embedding dimension between blocks
+n_head = 3 ## Number of heads per block
 n_blocks = 3 ## Number of transformer blocks
 dropout = 0.15
 # ------------
