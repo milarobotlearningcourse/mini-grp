@@ -1,2 +1,5 @@
 
 matplotlib
+rlds 
+dm-reverb 
+mediapy
