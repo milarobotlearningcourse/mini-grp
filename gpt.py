@@ -4,7 +4,7 @@ from torch.nn import functional as F
 
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
-block_size = 256 # what is the maximum context length (tokenized history) for predictions?
+block_size = 16 # what is the maximum context length (tokenized history) for predictions?
 max_iters = 1000
 eval_interval = 200
 learning_rate = 3e-4
@@ -15,17 +15,19 @@ n_head = 3 ## Number of heads per block
 n_blocks = 3 ## Number of transformer blocks
 dropout = 0.15
 # ------------
+text_file = "dataset/dataset_info.json"
 
 torch.manual_seed(1337)
 
 # wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
-with open('input.txt', 'r', encoding='utf-8') as f:
+with open(text_file, 'r', encoding='utf-8') as f:
     text = f.read()
 
 # here are all the unique characters that occur in this text
 chars = sorted(list(set(text)))
 vocab_size = len(chars)
 # create a mapping from characters to integers
+## This will need to be changed for robots..
 stoi = { ch:i for i,ch in enumerate(chars) }
 itos = { i:ch for i,ch in enumerate(chars) }
 encode = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list of integers
