@@ -13,19 +13,20 @@ import numpy as np
 from tqdm import tqdm, trange
 
 # hyperparameters
-batch_size = 18 # how many independent sequences will we process in parallel?
+batch_size = 64 # how many independent sequences will we process in parallel?
 block_size = 32 # what is the maximum context length for predictions?
 vocab_size = n_patches = 7
 max_iters = 5000
 eval_interval = 100
 learning_rate = 1e-3
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 8
+n_embd = 256
 # ------------
 
 torch.manual_seed(1337)
-n_head = 2
+n_head = 8
 n_blocks = 4
 dropout = 0.0
 # ------------
@@ -81,6 +82,17 @@ def get_patches(images):
             patches[idx, row * n_patches + column] = patch.flatten()
 
   return patches
+
+def get_patches_fast(images):
+    from einops import rearrange
+    n_patches = 7
+    batch_size, channels, height, width = images.shape
+    patch_size = height // n_patches
+
+    p = patch_size # P in maths
+
+    patches = rearrange(images, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
+    return patches
 
 def calc_positional_embeddings(sequence_length, d):
     result = torch.ones(sequence_length, d)
@@ -197,17 +209,17 @@ class VIT(nn.Module):
   def forward(self, images, targets=None):
     # Dividing images into patches
     n, c, h, w = images.shape
-    patches = get_patches(images).to(self.positional_embeddings.device)
+    patches = get_patches_fast(images).to(self.positional_embeddings.device)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
-    tokens = self.lin_map(patches)
+    out = self.lin_map(patches)
     
     # Adding classification token to the tokens
-    tokens = torch.cat((self.class_tokens.expand(n, 1, -1), tokens), dim=1)
+    out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
     
     # Adding positional embedding
-    out = tokens + self.positional_embeddings.repeat(n, 1, 1)
+    out = out + self.positional_embeddings.repeat(n, 1, 1)
     
     # Transformer Blocks
     for block in self.blocks:
