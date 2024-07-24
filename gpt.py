@@ -39,33 +39,6 @@ n = int(0.9*len(data)) # first 90% will be train, rest val
 train_data = data[:n]
 val_data = data[n:]
 
-
-def make_patches(batch):
-
-    # print(batch)
-    x, y = batch
-    images = x
-    n_patches = 7
-    batch_size, channels, height, width = images.shape
-
-    assert height == width, "Patchify method is implemented for square images only"
-
-    patches = torch.zeros(batch_size, n_patches ** 2, height * width * channels // n_patches ** 2)
-    ## Getting the square patches (batch, n_patches, channels, height / n_patches, width / n_patches)
-    patches_square = torch.zeros(batch_size, n_patches ** 2, channels, height // n_patches, width // n_patches)
-    patch_size = height // n_patches
-
-    for idx, image in enumerate(images):
-        # image = np.array([cv2.resize(np.array(image[0]), (64, 64))])
-        for i in range(n_patches):
-            for j in range(n_patches):
-                patch = image[:, i * patch_size: (i + 1) * patch_size, j * patch_size: (j + 1) * patch_size]
-                patches_square[idx, i * n_patches + j] = patch
-                patches[idx, i * n_patches + j] = patch.flatten()
-
-
-    print("patches", patches.shape)
-    print("patches_square", patches_square.shape)
 # data loading
 def get_batch(split):
     # generate a small batch of data of inputs x and targets y
