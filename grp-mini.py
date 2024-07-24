@@ -282,7 +282,7 @@ print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
 # create a PyTorch optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-
+    
 for iter in range(max_iters):
 
     # every once in a while evaluate the loss on train and val sets
@@ -291,10 +291,10 @@ for iter in range(max_iters):
         print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
 
     # sample a batch of data
-    xb, yb = get_batch_vit('train')
+    x1b, x2b, yb = get_batch_grp('train')
 
     # evaluate the loss
-    logits, loss = model(xb, yb)
+    logits, loss = model(x1b, x2b, yb)
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     optimizer.step()
