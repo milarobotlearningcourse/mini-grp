@@ -22,7 +22,7 @@ learning_rate = 1e-3
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 256
+n_embd = 16
 # ------------
 
 torch.manual_seed(1337)
@@ -182,8 +182,6 @@ class VIT(nn.Module):
     # assert shape[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
     # assert shape[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
     self.patch_size = (shape[1] / n_patches, shape[2] / n_patches)
-
-
 
     #Positional embedding
     # self.pos_embed = nn.Parameter(torch.tensor(positional_embeddings(n_patches ** 2 + 1, embedding_size)))

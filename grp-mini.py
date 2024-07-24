@@ -14,7 +14,7 @@ from tqdm import tqdm, trange
 
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
-block_size = 32 # what is the maximum context length for predictions?
+block_size = 5 # what is the maximum context length for predictions?
 vocab_size = n_patches = 7
 max_iters = 5000
 eval_interval = 100
@@ -22,7 +22,7 @@ learning_rate = 1e-3
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 256
+n_embd = 32
 n_embed_text = 256
 # ------------
 
@@ -37,10 +37,11 @@ transform = ToTensor()
 train_set = MNIST(root='./datasets', train=True, download=True, transform=transform)
 val_data = MNIST(root='./datasets', train=False, download=True, transform=transform)
 
-# text = "zero, one, two, three, four, five, six, seven, eight, nine"
-text_file = "goal_action_info.txt"
-with open(text_file, 'r', encoding='utf-8') as f:
-    text = f.read()
+text = "zero ,one  ,two  ,three,four ,five ,six  ,seven,eight,nine "
+goals = text.split(",")
+# text_file = "goal_action_info.txt"
+# with open(text_file, 'r', encoding='utf-8') as f:
+#     text = f.read()
 # here are all the unique characters that occur in this text
 chars = sorted(list(set(text)))
 vocab_size = len(chars)
@@ -52,9 +53,11 @@ encode = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list 
 decode = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
 
 data = torch.tensor(encode(text), dtype=torch.long)
-n = int(0.9*len(data)) # first 90% will be train, rest val
-train_data_text = data[:n]
-val_data_text = data[n:]
+goals = torch.tensor([encode(goal) for goal in goals])
+# n = int(0.9*len(data)) # first 90% will be train, rest val
+# print(goals)
+train_data_text = data
+val_data_text = data
 
 
 # data loading
@@ -67,7 +70,7 @@ def get_batch_grp(split):
     y = torch.stack([torch.as_tensor([data[i][1]]) for i in ix])
     data = train_data_text if split == 'train' else val_data_text
     ix = torch.randint(len(data) - block_size, (batch_size,))
-    x2 = torch.stack([data[i:i+block_size] for i in ix])
+    x2 = torch.stack([goals[y[i,0]] for i in ix])
     x1, x2, y = x1.to(device), x2.to(device), y.to(device)
     return x1, x2, y
 
@@ -131,7 +134,6 @@ class Head(nn.Module):
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
         # self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
-
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
@@ -164,7 +166,6 @@ class MultiHeadAttention(nn.Module):
 
 class FeedFoward(nn.Module):
     """ a simple linear layer followed by a non-linearity """
-
     def __init__(self, n_embd):
         super().__init__()
         self.net = nn.Sequential(
@@ -199,7 +200,7 @@ class GRP(nn.Module): # Generalist Robot Policy
     super(GRP, self).__init__()
     ## Text processing portion
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-    self.position_embedding_table = nn.Embedding(block_size, n_embd)
+    self.position_embedding_table = nn.Embedding(block_size + (n_patches ** 2 + 1), n_embd)
     
     # Image processing portion.
     self.n_patches = 7
@@ -208,12 +209,10 @@ class GRP(nn.Module): # Generalist Robot Policy
     # assert shape[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
     self.patch_size = (shape[1] / n_patches, shape[2] / n_patches)
 
-
-
     #Positional embedding
     # self.pos_embed = nn.Parameter(torch.tensor(positional_embeddings(n_patches ** 2 + 1, embedding_size)))
     # self. pos_embed.requires_grad = False
-    self.register_buffer('positional_embeddings', calc_positional_embeddings(n_patches ** 2 + 1, n_embd), persistent=False)
+    # self.register_buffer('positional_embeddings', calc_positional_embeddings(n_patches ** 2 + 1, n_embd), persistent=False)
     
     self.class_tokens = nn.Parameter(torch.rand(1, n_embd))
 
@@ -234,14 +233,16 @@ class GRP(nn.Module): # Generalist Robot Policy
   def forward(self, images, idx, targets=None):
     ## Text processing first 
     B, T = idx.shape
-    # idx and targets are both (B,T) tensor of integers
-    tok_emb_txt = self.token_embedding_table(idx) # (B,T,C)
-    pos_emb_txt = self.position_embedding_table(torch.arange(T, device=device)) # (T,C)
-    x_text = tok_emb_txt + pos_emb_txt # (B,T,C)
-
     # Dividing images into patches
     n, c, h, w = images.shape
     patches = get_patches_fast(images).to(device) # (B, N_P, C)
+    _, n_patches, _ = patches.shape
+
+    # idx and targets are both (B,T) tensor of integers
+    tok_emb_txt = self.token_embedding_table(idx) # (B,T,C)
+    pos_emb = self.position_embedding_table(torch.arange(T + n_patches + 1, device=device)) # (T,C)
+    x_text = tok_emb_txt # + pos_emb_txt # (B,T,C)
+
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
@@ -251,10 +252,13 @@ class GRP(nn.Module): # Generalist Robot Policy
     out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1) # (B, n_embed +1)
     
     # Adding positional embedding
-    out = out + self.positional_embeddings.repeat(n, 1, 1) # (B, n_embed + 1)
+    # out = out + self.positional_embeddings.repeat(n, 1, 1) # (B, n_embed + 1)
 
     # out = out + x_text
     out = torch.cat([out, x_text], dim=1)
+
+    ## Add position embedding for text and image patches
+    out = out + pos_emb
     
     # Transformer Blocks
     for block in self.blocks:
@@ -282,7 +286,7 @@ print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
 # create a PyTorch optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-    
+
 for iter in range(max_iters):
 
     # every once in a while evaluate the loss on train and val sets
