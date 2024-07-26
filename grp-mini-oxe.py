@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 
 from torchvision.transforms import ToTensor
 from torchvision.datasets.mnist import MNIST
+import tensorflow_datasets as tfds
 
 import numpy as np
 from tqdm import tqdm, trange
@@ -34,11 +35,16 @@ dropout = 0.0
 # Train and test splits
 # Loading data
 transform = ToTensor()
-train_set = MNIST(root='./datasets', train=True, download=True, transform=transform)
-val_data = MNIST(root='./datasets', train=False, download=True, transform=transform)
+# create RLDS dataset builder
+num_episodes = 2 ## How many episodes to grab from the dataset for training
+builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridge/0.1.0/')
+dataset = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
 
-text = "zero ,one  ,two  ,three,four ,five ,six  ,seven,eight,nine "
-goals = text.split(",")
+text = ""
+for episode in dataset:
+    steps = list(episode['steps'])
+    text = text + str(steps[0]['observation']['natural_language_instruction'].numpy().decode())
+
 # text_file = "goal_action_info.txt"
 # with open(text_file, 'r', encoding='utf-8') as f:
 #     text = f.read()
@@ -53,11 +59,10 @@ encode = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list 
 decode = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
 
 data = torch.tensor(encode(text), dtype=torch.long)
-goals = torch.tensor([encode(goal) for goal in goals])
 # n = int(0.9*len(data)) # first 90% will be train, rest val
 # print(goals)
-train_data_text = data
-val_data_text = data
+train_set = data
+val_data = data
 
 
 # data loading
@@ -67,11 +72,10 @@ def get_batch_grp(split):
     ix = torch.randint(len(data), (batch_size,))
     # print ( data[ix])
     x1 = torch.stack([data[i][0] for i in ix])
-    y = torch.stack([torch.as_tensor([data[i][1]]) for i in ix])
-    data = train_data_text if split == 'train' else val_data_text
+    action = torch.stack([torch.as_tensor([data[i][1]]) for i in ix])
     # ix = torch.randint(len(goals) - block_size, (batch_size,))
-    x2 = torch.stack([goals[y_[0]] for y_ in y])
-    x1, x2, y = x1.to(device), x2.to(device), y.to(device)
+    goals = torch.stack([goals[y_[0]] for y_ in y])
+    goals, obs, y = goals.to(device), obs.to(device), y.to(device)
     return x1, x2, y
 
 @torch.no_grad()
