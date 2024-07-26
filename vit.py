@@ -192,9 +192,8 @@ class VIT(nn.Module):
 
     self.input_d = int(shape[0] * self.patch_size[0] * self.patch_size[1])
 
-    self.lin_map = nn.Linear(self.input_d, n_embd, bias=False) ## Here what I am interested in
+    self.lin_map = nn.Linear(self.input_d, n_embd, bias=False) 
 
-     
     # 4) Transformer encoder blocks
     self.blocks = nn.ModuleList([Block(n_embd, n_head) for _ in range(n_blocks)])
 
