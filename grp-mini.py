@@ -69,8 +69,8 @@ def get_batch_grp(split):
     x1 = torch.stack([data[i][0] for i in ix])
     y = torch.stack([torch.as_tensor([data[i][1]]) for i in ix])
     data = train_data_text if split == 'train' else val_data_text
-    ix = torch.randint(len(data) - block_size, (batch_size,))
-    x2 = torch.stack([goals[y[i,0]] for i in ix])
+    # ix = torch.randint(len(goals) - block_size, (batch_size,))
+    x2 = torch.stack([goals[y_[0]] for y_ in y])
     x1, x2, y = x1.to(device), x2.to(device), y.to(device)
     return x1, x2, y
 
