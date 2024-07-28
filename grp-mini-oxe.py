@@ -12,15 +12,17 @@ import tensorflow_datasets as tfds
 
 import numpy as np
 from tqdm import tqdm, trange
+import cv2
 
 # hyperparameters
 batch_size = 65 # how many independent sequences will we process in parallel?
 block_size = 5 # what is the maximum context length for predictions?
 n_patches = 8
 max_iters = 5000
-eval_interval = 100
+eval_interval = 10
 learning_rate = 1e-3
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+# device = 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
 n_embd = 32
@@ -33,8 +35,7 @@ n_blocks = 4
 dropout = 0.0
 
 ## Data specific hyper parameters
-action_bins = 20
-image_resolution = 64
+output_size = action_bins = 20
 image_shape = [64,64,3]
 
 # ------------
@@ -48,11 +49,15 @@ datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
 dataset = []
 text, shortest_goal_txt= "", 100000000 ## Get the charaters for the goals and use them for the encoding.
 for episode in datasetRemote:
-    dataset.append(episode) ## Save these episodes locally for training.
+    episode_ = {'steps': list(episode['steps'])}
+    for i in range(len(episode_['steps'])): ## Resize images to reduce computation
+        episode_['steps'][i]['observation']['image'] = cv2.resize(np.array(episode_['steps'][i]['observation']['image']), (image_shape[0], image_shape[1])) 
+    dataset.append(episode_) ## Save these episodes locally for training.
     steps = list(episode['steps'])
     goal = steps[0]['observation']['natural_language_instruction'].numpy().decode()
     if len(goal) < shortest_goal_txt: shortest_goal_txt = len(goal)
     text = text + str(goal)
+block_size = shortest_goal_txt ## This will determine block size
 # here are all the unique characters that occur in this text
 chars = sorted(list(set(text)))
 vocab_size = len(chars)
@@ -69,7 +74,8 @@ for episode in dataset:
     actions.extend([step['action']['world_vector'] for step in steps]) 
 actions = np.array(actions)
 a_min = actions.min(axis=0) ## Get the min and max bound for the actions to use for bining 
-a_max = actions.max(axis=0)
+a_max = actions.max(axis=0) 
+a_max = a_max + ((a_max - a_min) / float(action_bins * 2)) ## + a little to avoid using action_bins + 1 for the action = max
 spacing = (a_max - a_min)/float(action_bins)
 encode_action = lambda af:   np.floor((af - a_min)/spacing).astype(np.int32) # encoder: take a float, output an integer
 decode_action = lambda binN: (binN * spacing) + a_min  # decoder: take a list of integers, output a string
@@ -90,9 +96,11 @@ def get_batch_grp_oxe(split):
     goals, obs, actions = ([] for i in range(3))
     for e in ex:
         idx = torch.randint(len(data[e]['steps']), (1,1))
-        goals.append(encode_txt(list(data[e]['steps'])[idx]['observation']['natural_language_instruction'].numpy().decode()[:shortest_goal_txt])) ## Trim to shortest goal length
-        obs.append(cv2.resize(np.array(list(data[e]['steps'])[idx]['observation']['image']), (image_resolution, image_resolution)))
-        actions.append(encode_action(list(data[e]['steps'])[idx]['action']['world_vector'])[0])
+        steps = list(data[e]['steps'])
+        goals.append(encode_txt(steps[idx]['observation']['natural_language_instruction'].numpy().decode()[:shortest_goal_txt])) ## Trim to shortest goal length
+        obs.append(steps[idx]['observation']['image'])
+        # obs.append(cv2.resize(np.array(steps[idx]['observation']['image']), (image_shape[0], image_shape[1])))
+        actions.append(encode_action(steps[idx]['action']['world_vector'])[0])
     goals, obs, actions = torch.tensor(goals, dtype=torch.long), torch.tensor(obs, dtype=torch.float32), torch.tensor(actions, dtype=torch.long)
     goals, obs, actions = goals.to(device), obs.to(device), actions.to(device)
     return goals, obs, actions
@@ -240,9 +248,9 @@ class GRP(nn.Module): # Generalist Robot Policy
     # 4) Transformer encoder blocks
     self.blocks = nn.ModuleList([Block(n_embd, n_head) for _ in range(n_blocks)])
 
-    # 5) Classification MLPk
+    # 5) Classification MLP
     self.mlp = nn.Sequential(
-        nn.Linear(n_embd, 10),
+        nn.Linear(n_embd, output_size),
         nn.Softmax(dim=-1)
     )
 
