@@ -14,9 +14,9 @@ import numpy as np
 from tqdm import tqdm, trange
 
 # hyperparameters
-batch_size = 64 # how many independent sequences will we process in parallel?
+batch_size = 65 # how many independent sequences will we process in parallel?
 block_size = 5 # what is the maximum context length for predictions?
-vocab_size = n_patches = 7
+n_patches = 8
 max_iters = 5000
 eval_interval = 100
 learning_rate = 1e-3
@@ -31,52 +31,71 @@ torch.manual_seed(1337)
 n_head = 8
 n_blocks = 4
 dropout = 0.0
+
+## Data specific hyper parameters
+action_bins = 20
+image_resolution = 64
+image_shape = [64,64,3]
+
 # ------------
 # Train and test splits
 # Loading data
 transform = ToTensor()
 # create RLDS dataset builder
-num_episodes = 2 ## How many episodes to grab from the dataset for training
+num_episodes = 3 ## How many episodes to grab from the dataset for training
 builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridge/0.1.0/')
-dataset = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
-
-text = ""
-for episode in dataset:
+datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
+dataset = []
+text, shortest_goal_txt= "", 100000000 ## Get the charaters for the goals and use them for the encoding.
+for episode in datasetRemote:
+    dataset.append(episode) ## Save these episodes locally for training.
     steps = list(episode['steps'])
-    text = text + str(steps[0]['observation']['natural_language_instruction'].numpy().decode())
-
-# text_file = "goal_action_info.txt"
-# with open(text_file, 'r', encoding='utf-8') as f:
-#     text = f.read()
+    goal = steps[0]['observation']['natural_language_instruction'].numpy().decode()
+    if len(goal) < shortest_goal_txt: shortest_goal_txt = len(goal)
+    text = text + str(goal)
 # here are all the unique characters that occur in this text
 chars = sorted(list(set(text)))
 vocab_size = len(chars)
 # create a mapping from characters to integers
-## This will need to be changed for robots..
 stoi = { ch:i for i,ch in enumerate(chars) }
 itos = { i:ch for i,ch in enumerate(chars) }
-encode = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list of integers
-decode = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
+encode_txt = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list of integers
+decode_txy = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
 
-data = torch.tensor(encode(text), dtype=torch.long)
-# n = int(0.9*len(data)) # first 90% will be train, rest val
-# print(goals)
-train_set = data
-val_data = data
+## Get the actions and encode them as well.
+actions = [] ## Get the charaters for the goals and use them for the encoding.
+for episode in dataset:
+    steps = list(episode['steps'])
+    actions.extend([step['action']['world_vector'] for step in steps]) 
+actions = np.array(actions)
+a_min = actions.min(axis=0) ## Get the min and max bound for the actions to use for bining 
+a_max = actions.max(axis=0)
+spacing = (a_max - a_min)/float(action_bins)
+encode_action = lambda af:   np.floor((af - a_min)/spacing).astype(np.int32) # encoder: take a float, output an integer
+decode_action = lambda binN: (binN * spacing) + a_min  # decoder: take a list of integers, output a string
+
+# data = torch.tensor(encode(text), dtype=torch.long)
+train_set = dataset
+val_data = dataset
 
 
 # data loading
-def get_batch_grp(split):
+def get_batch_grp_oxe(split):
+    import cv2
     # generate a small batch of inputs x and targets y
     data = train_set if split == 'train' else val_data
-    ix = torch.randint(len(data), (batch_size,))
-    # print ( data[ix])
-    x1 = torch.stack([data[i][0] for i in ix])
-    action = torch.stack([torch.as_tensor([data[i][1]]) for i in ix])
-    # ix = torch.randint(len(goals) - block_size, (batch_size,))
-    goals = torch.stack([goals[y_[0]] for y_ in y])
-    goals, obs, y = goals.to(device), obs.to(device), y.to(device)
-    return x1, x2, y
+    ## Get indicies for random episodes
+    ex = torch.randint(len(data), (batch_size,))
+    ## Get random timesetp for variable length episodes
+    goals, obs, actions = ([] for i in range(3))
+    for e in ex:
+        idx = torch.randint(len(data[e]['steps']), (1,1))
+        goals.append(encode_txt(list(data[e]['steps'])[idx]['observation']['natural_language_instruction'].numpy().decode()[:shortest_goal_txt])) ## Trim to shortest goal length
+        obs.append(cv2.resize(np.array(list(data[e]['steps'])[idx]['observation']['image']), (image_resolution, image_resolution)))
+        actions.append(encode_action(list(data[e]['steps'])[idx]['action']['world_vector'])[0])
+    goals, obs, actions = torch.tensor(goals, dtype=torch.long), torch.tensor(obs, dtype=torch.float32), torch.tensor(actions, dtype=torch.long)
+    goals, obs, actions = goals.to(device), obs.to(device), actions.to(device)
+    return goals, obs, actions
 
 @torch.no_grad()
 def estimate_loss():
@@ -85,7 +104,7 @@ def estimate_loss():
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X1, X2, Y = get_batch_grp(split)
+            X1, X2, Y = get_batch_grp_oxe(split)
             logits, loss = model(X1, X2, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
@@ -93,7 +112,6 @@ def estimate_loss():
     return out
 
 def get_patches(images):
-  n_patches = 7
   batch_size, channels, height, width = images.shape
 
   assert height == width, "square images only"
@@ -112,13 +130,12 @@ def get_patches(images):
 
 def get_patches_fast(images):
     from einops import rearrange
-    n_patches = 7
     batch_size, channels, height, width = images.shape
     patch_size = height // n_patches
 
     p = patch_size # P in maths
 
-    patches = rearrange(images, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
+    patches = rearrange(images, 'b (h p1) (w p2) c -> b (h w) (p1 p2 c)', p1 = p, p2 = p) ## Channel last
     return patches
 
 def calc_positional_embeddings(sequence_length, d):
@@ -206,12 +223,7 @@ class GRP(nn.Module): # Generalist Robot Policy
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
     self.position_embedding_table = nn.Embedding(block_size + (n_patches ** 2 + 1), n_embd)
     
-    # Image processing portion.
-    self.n_patches = 7
-    shape = (1, 28, 28)
-    # assert shape[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
-    # assert shape[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
-    self.patch_size = (shape[1] / n_patches, shape[2] / n_patches)
+    self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
 
     #Positional embedding
     # self.pos_embed = nn.Parameter(torch.tensor(positional_embeddings(n_patches ** 2 + 1, embedding_size)))
@@ -220,7 +232,7 @@ class GRP(nn.Module): # Generalist Robot Policy
     
     self.class_tokens = nn.Parameter(torch.rand(1, n_embd))
 
-    self.input_d = int(shape[0] * self.patch_size[0] * self.patch_size[1])
+    self.input_d = int(image_shape[2] * self.patch_size[0] * self.patch_size[1])
 
     self.lin_map = nn.Linear(self.input_d, n_embd, bias=False) ## Here what I am interested in
 
@@ -234,7 +246,7 @@ class GRP(nn.Module): # Generalist Robot Policy
         nn.Softmax(dim=-1)
     )
 
-  def forward(self, images, idx, targets=None):
+  def forward(self, idx, images, targets=None):
     ## Text processing first 
     B, T = idx.shape
     # Dividing images into patches
@@ -299,7 +311,7 @@ for iter in range(max_iters):
         print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
 
     # sample a batch of data
-    x1b, x2b, yb = get_batch_grp('train')
+    x1b, x2b, yb = get_batch_grp_oxe('train')
 
     # evaluate the loss
     logits, loss = model(x1b, x2b, yb)
