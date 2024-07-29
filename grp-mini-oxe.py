@@ -20,7 +20,7 @@ block_size = 5 # what is the maximum context length for predictions?
 n_patches = 8
 max_iters = 5000
 eval_interval = 10
-learning_rate = 1e-3
+learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
@@ -32,7 +32,7 @@ n_embed_text = 256
 torch.manual_seed(1337)
 n_head = 8
 n_blocks = 4
-dropout = 0.0
+dropout = 0.1
 
 ## Data specific hyper parameters
 output_size = action_bins = 20
@@ -227,11 +227,13 @@ class Block(nn.Module):
         return x
 
 class GRP(nn.Module): # Generalist Robot Policy
+  ## Condesning the code from here https://github.com/octo-models/octo/blob/main/octo/model/octo_module.py#L160
   def __init__(self, mlp_ratio=4):
     super(GRP, self).__init__()
     ## Text processing portion
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-    self.position_embedding_table = nn.Embedding(block_size + (n_patches ** 2 + 1), n_embd)
+    self.position_embedding_table_goal = nn.Embedding(block_size, n_embd)
+    self.position_embedding_table_obs = nn.Embedding(n_patches ** 2 + 1, n_embd)
     
     self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
 
@@ -244,7 +246,10 @@ class GRP(nn.Module): # Generalist Robot Policy
 
     self.input_d = int(image_shape[2] * self.patch_size[0] * self.patch_size[1])
 
-    self.lin_map = nn.Linear(self.input_d, n_embd, bias=False) ## Here what I am interested in
+    self.lin_map = nn.Linear(self.input_d, n_embd, bias=False)
+
+    # Adding classification token to the tokens
+    out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
 
     # concat = torch.cat([self.token_embedding_table, self.lin_map], dim=1)
     # 4) Transformer encoder blocks
