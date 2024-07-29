@@ -25,7 +25,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 32
+n_embd = 128
 n_embed_text = 256
 # ------------
 
@@ -49,14 +49,16 @@ datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
 dataset = []
 text, shortest_goal_txt= "", 100000000 ## Get the charaters for the goals and use them for the encoding.
 for episode in datasetRemote:
-    episode_ = {'steps': list(episode['steps'])}
-    for i in range(len(episode_['steps'])): ## Resize images to reduce computation
-        episode_['steps'][i]['observation']['image'] = cv2.resize(np.array(episode_['steps'][i]['observation']['image']), (image_shape[0], image_shape[1])) 
+    episode_ = {'steps': [] }
+    episode = list(episode['steps'])
+    for i in range(len(episode)): ## Resize images to reduce computation
+        obs = cv2.resize(np.array(episode[i]['observation']['image']), (image_shape[0], image_shape[1])) 
+        action = episode[i]['action']['world_vector']
+        goal = episode[0]['observation']['natural_language_instruction'].numpy().decode()
+        episode_['steps'].append({"obs": obs, "action": action, "goal": goal})
+        if len(goal) < shortest_goal_txt: shortest_goal_txt = len(goal)
+        text = text + str(goal)
     dataset.append(episode_) ## Save these episodes locally for training.
-    steps = list(episode['steps'])
-    goal = steps[0]['observation']['natural_language_instruction'].numpy().decode()
-    if len(goal) < shortest_goal_txt: shortest_goal_txt = len(goal)
-    text = text + str(goal)
 block_size = shortest_goal_txt ## This will determine block size
 # here are all the unique characters that occur in this text
 chars = sorted(list(set(text)))
@@ -71,7 +73,7 @@ decode_txy = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of i
 actions = [] ## Get the charaters for the goals and use them for the encoding.
 for episode in dataset:
     steps = list(episode['steps'])
-    actions.extend([step['action']['world_vector'] for step in steps]) 
+    actions.extend([step['action'] for step in steps]) 
 actions = np.array(actions)
 a_min = actions.min(axis=0) ## Get the min and max bound for the actions to use for bining 
 a_max = actions.max(axis=0) 
@@ -97,11 +99,11 @@ def get_batch_grp_oxe(split):
     for e in ex:
         idx = torch.randint(len(data[e]['steps']), (1,1))
         steps = list(data[e]['steps'])
-        goals.append(encode_txt(steps[idx]['observation']['natural_language_instruction'].numpy().decode()[:shortest_goal_txt])) ## Trim to shortest goal length
-        obs.append(steps[idx]['observation']['image'])
+        goals.append(encode_txt(steps[idx]['goal'][:shortest_goal_txt])) ## Trim to shortest goal length
+        obs.append(steps[idx]['obs'])
         # obs.append(cv2.resize(np.array(steps[idx]['observation']['image']), (image_shape[0], image_shape[1])))
-        actions.append(encode_action(steps[idx]['action']['world_vector'])[0])
-    goals, obs, actions = torch.tensor(goals, dtype=torch.long), torch.tensor(obs, dtype=torch.float32), torch.tensor(actions, dtype=torch.long)
+        actions.append(encode_action(steps[idx]['action'])[0])
+    goals, obs, actions = torch.tensor(np.array(goals), dtype=torch.long), torch.tensor(np.array(obs), dtype=torch.float32), torch.tensor(np.array(actions), dtype=torch.long)
     goals, obs, actions = goals.to(device), obs.to(device), actions.to(device)
     return goals, obs, actions
 
