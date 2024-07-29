@@ -50,7 +50,7 @@ for episode in datasetRemote:
         action = np.array(episode[i]['action']['world_vector'])
         # action = torch.as_tensor(action) # grab first dimention
         dataset.append([torch.tensor(obs, dtype=torch.float32), action])
-print("Dataset shape:", len(dataset[0]))
+print("Dataset shape:", len(dataset))
 
 ## Get the actions and encode them as well.
 actions = np.array( [dataset[i][1] for i in range(len(dataset))])
