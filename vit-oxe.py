@@ -18,11 +18,11 @@ vocab_size = n_patches = 8
 max_iters = 5000
 eval_interval = 100
 learning_rate = 1e-3
-device = 'cpu'
-# device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
+# device = 'cpu'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 16
+n_embd = 128
 # ------------
 
 torch.manual_seed(1337)
@@ -31,51 +31,71 @@ n_blocks = 4
 dropout = 0.0
 
 ## Model hyperparameters
-action_bins = 20
+action_bins = 10
 image_shape = [64, 64, 3]
+
+from datasets import load_dataset
+
+ds = load_dataset("EleutherAI/cifarnet")
 
 # ------------
 # Train and test splits
 # Loading data
 # create RLDS dataset builder
-num_episodes = 1 ## How many episodes to grab from the dataset for training
-builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridge/0.1.0/')
-datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
-dataset = []
-for episode in datasetRemote:
-    episode_ = {'steps': [] }
-    episode = list(episode['steps'])
-    for i in range(len(episode)): ## Resize images to reduce computation
-        obs = cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1])) 
-        action = np.array(episode[i]['action']['world_vector'])
-        # action = torch.as_tensor(action) # grab first dimention
-        dataset.append([torch.tensor(obs, dtype=torch.float32), action])
-print("Dataset shape:", len(dataset))
+# num_episodes = 1 ## How many episodes to grab from the dataset for training
+# builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridge/0.1.0/')
+# datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
+# dataset = []
+# for episode in datasetRemote:
+#     episode_ = {'steps': [] }
+#     episode = list(episode['steps'])
+#     for i in range(len(episode)): ## Resize images to reduce computation
+#         obs = cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1])) 
+#         action = np.array(episode[i]['action']['world_vector'])
+#         # action = torch.as_tensor(action) # grab first dimention
+#         dataset.append([torch.tensor(obs, dtype=torch.float32), action])
+# print("Dataset shape:", len(dataset))
 
-## Get the actions and encode them as well.
-actions = np.array( [dataset[i][1] for i in range(len(dataset))])
-a_min = actions.min(axis=0) ## Get the min and max bound for the actions to use for bining 
-a_max = actions.max(axis=0) 
-a_max = a_max + ((a_max - a_min) / float(action_bins * 2)) ## + a little to avoid using action_bins + 1 for the action = max
-spacing = (a_max - a_min)/float(action_bins)
-encode_action = lambda af:   np.floor((af - a_min)/spacing).astype(np.int64) # encoder: take a float, output an integer
-decode_action = lambda binN: (binN * spacing) + a_min  # decoder: take a list of integers, output a string
-for i in range(len(dataset)): ## Convert to classes
-    dataset[i][1] = torch.as_tensor(encode_action(dataset[i][1])[:1])
-n = int(0.9*len(dataset)) # first 90% will be train, rest val
-train_set = dataset[:n]
-val_set = dataset[n:]
+# ## Get the actions and encode them as well.
+# actions = np.array( [dataset[i][1] for i in range(len(dataset))])
+# a_min = actions.min(axis=0) ## Get the min and max bound for the actions to use for bining 
+# a_max = actions.max(axis=0) 
+# a_max = a_max + ((a_max - a_min) / float(action_bins * 2)) ## + a little to avoid using action_bins + 1 for the action = max
+# spacing = (a_max - a_min)/float(action_bins)
+# encode_action = lambda af:   np.floor((af - a_min)/spacing).astype(np.int64) # encoder: take a float, output an integer
+# decode_action = lambda binN: (binN * spacing) + a_min  # decoder: take a list of integers, output a string
+# for i in range(len(dataset)): ## Convert to classes
+#     dataset[i][1] = torch.as_tensor(encode_action(dataset[i][1])[:1])
+# n = int(0.9*len(dataset)) # first 90% will be train, rest val
+# train_set = dataset[:n]
+# val_set = dataset[n:]
 
 
 
 # data loading
-def get_batch_vit(split):
+def get_batch_oxe(split):
     # generate a small batch of inputs x and targets y
     data = train_set if split == 'train' else val_set
     ix = torch.randint(len(data), (batch_size,))
     # print ( data[ix])
     x = torch.stack([data[i][0] for i in ix])
     y = torch.stack([data[i][1] for i in ix])
+    x, y = x.to(device), y.to(device)
+    return x, y
+
+# data loading
+def get_batch_vit(split):
+    # generate a small batch of inputs x and targets y
+    data = ds['train'] if split == 'train' else ds['test']
+    ix = np.random.randint(int(len(data)), size=(batch_size,))
+    l = len(data)
+    print (l, ix)
+    x = data[ix]
+    # x = np.array(x[ix[0]])
+    print (x)
+    print (np.array(x["img"][0].getdata()))
+    x = torch.stack([np.array(x["img"][i].getdata()) for i in range(len(ix))])
+    y = torch.stack([data["label"][i] for i in range(len(ix))])
     x, y = x.to(device), y.to(device)
     return x, y
 

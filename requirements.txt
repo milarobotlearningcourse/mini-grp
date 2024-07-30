@@ -8,3 +8,6 @@ tensorflow==2.15.0
 tensorflow_datasets==4.9.2
 moviepy>=1.0.3
 einops==0.8.0
+huggingface
+datasets
+Pillow==9.4.0
