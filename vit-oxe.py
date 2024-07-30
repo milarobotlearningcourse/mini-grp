@@ -89,13 +89,14 @@ def get_batch_vit(split):
     data = ds['train'] if split == 'train' else ds['test']
     ix = np.random.randint(int(len(data)), size=(batch_size,))
     l = len(data)
-    print (l, ix)
+    # print (l, ix)
     x = data[ix]
     # x = np.array(x[ix[0]])
-    print (x)
-    print (np.array(x["img"][0].getdata()))
-    x = torch.stack([np.array(x["img"][i].getdata()) for i in range(len(ix))])
-    y = torch.stack([data["label"][i] for i in range(len(ix))])
+    # print (x)
+    # x = np.array(x["img"][0].getdata())
+    # print(x.shape)
+    x = torch.stack([torch.tensor(np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32), image_shape)) for i in range(len(ix))])
+    y = torch.stack([torch.tensor(data["label"][i]) for i in range(len(ix))])
     x, y = x.to(device), y.to(device)
     return x, y
 
