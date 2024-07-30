@@ -12,7 +12,7 @@ from tqdm import tqdm, trange
 import cv2
 
 # hyperparameters
-batch_size = 64 # how many independent sequences will we process in parallel?
+batch_size = 65 # how many independent sequences will we process in parallel?
 block_size = 32 # what is the maximum context length for predictions?
 vocab_size = n_patches = 8
 max_iters = 5000
@@ -37,6 +37,16 @@ image_shape = [64, 64, 3]
 from datasets import load_dataset
 
 ds = load_dataset("EleutherAI/cifarnet")
+
+data = torch.tensor(ds)
+
+# np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
+data = {"train": 
+        {"img": np.array([np.reshape(np.array(ds["train"]["img"][i].getdata()), image_shape) for i in range(int(len(ds["train"]["img"])))], dtype=np.unit8),
+         "label": np.array(ds["train"]["label"], dtype=np.unit8) },         
+        "test": {"img": np.array(ds["test"]["img"], dtype=np.unit8),
+         "label": np.array(ds["test"]["label"], dtype=np.unit8)}
+         }
 
 # ------------
 # Train and test splits
