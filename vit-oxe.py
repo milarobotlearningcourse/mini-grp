@@ -38,14 +38,18 @@ from datasets import load_dataset
 
 ds = load_dataset("EleutherAI/cifarnet")
 
-data = torch.tensor(ds)
+# data = torch.tensor(ds)
 
 # np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
-data = {"train": 
-        {"img": np.array([np.reshape(np.array(ds["train"]["img"][i].getdata()), image_shape) for i in range(int(len(ds["train"]["img"])))], dtype=np.unit8),
-         "label": np.array(ds["train"]["label"], dtype=np.unit8) },         
-        "test": {"img": np.array(ds["test"]["img"], dtype=np.unit8),
-         "label": np.array(ds["test"]["label"], dtype=np.unit8)}
+data = {
+    # "train": 
+    #     {"img": torch.tensor(np.array([np.reshape(np.array(ds["train"]["img"][i].getdata()), image_shape) for i in range(int(len(ds["train"]["img"])))], dtype=np.unit8)),
+    #      "label": torch.tensor(np.array(ds["train"]["label"], dtype=np.unit8)) },         
+    "test": 
+        {
+            # "img": torch.tensor(np.array([np.reshape(np.array(ds["test"]["img"][i]), image_shape) for i in range(int(len(ds["train"]["img"])))], dtype=np.unit8)),
+           "img": torch.tensor(np.array(ds["test"]["img"], dtype=np.uint8)),
+           "label": torch.tensor(np.array(ds["test"]["label"], dtype=np.uint8))}
          }
 
 # ------------
@@ -96,7 +100,7 @@ def get_batch_oxe(split):
 # data loading
 def get_batch_vit(split):
     # generate a small batch of inputs x and targets y
-    data = ds['train'] if split == 'train' else ds['test']
+    data = data['test'] if split == 'train' else data['test']
     ix = np.random.randint(int(len(data)), size=(batch_size,))
     l = len(data)
     # print (l, ix)
