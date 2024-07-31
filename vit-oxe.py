@@ -28,7 +28,7 @@ n_embd = 128
 torch.manual_seed(1337)
 n_head = 8
 n_blocks = 4
-dropout = 0.0
+dropout = 0.1
 
 ## Model hyperparameters
 action_bins = 10
@@ -41,15 +41,14 @@ ds = load_dataset("EleutherAI/cifarnet")
 # data = torch.tensor(ds)
 
 # np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
-data = {
-    # "train": 
-    #     {"img": torch.tensor(np.array([np.reshape(np.array(ds["train"]["img"][i].getdata()), image_shape) for i in range(int(len(ds["train"]["img"])))], dtype=np.unit8)),
-    #      "label": torch.tensor(np.array(ds["train"]["label"], dtype=np.unit8)) },         
-    "test": 
-        {
-            # "img": torch.tensor(np.array([np.reshape(np.array(ds["test"]["img"][i]), image_shape) for i in range(int(len(ds["train"]["img"])))], dtype=np.unit8)),
-           "img": torch.tensor(np.array(ds["test"]["img"], dtype=np.uint8)),
-           "label": torch.tensor(np.array(ds["test"]["label"], dtype=np.uint8))}
+dataset = {}
+dataset["train"]= {
+           "img": torch.tensor(np.array(ds["train"]["img"], dtype=np.uint8)).to(device),
+           "label": torch.tensor(np.array(ds["train"]["label"], dtype=np.uint8)).to(device) 
+          }         
+dataset["test"]=  {
+           "img": torch.tensor(np.array(ds["test"]["img"], dtype=np.uint8)).to(device),
+           "label": torch.tensor(np.array(ds["test"]["label"], dtype=np.uint8)).to(device)
          }
 
 # ------------
@@ -100,18 +99,11 @@ def get_batch_oxe(split):
 # data loading
 def get_batch_vit(split):
     # generate a small batch of inputs x and targets y
-    data = data['test'] if split == 'train' else data['test']
-    ix = np.random.randint(int(len(data)), size=(batch_size,))
-    l = len(data)
-    # print (l, ix)
-    x = data[ix]
-    # x = np.array(x[ix[0]])
-    # print (x)
-    # x = np.array(x["img"][0].getdata())
-    # print(x.shape)
-    x = torch.stack([torch.tensor(np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32), image_shape)) for i in range(len(ix))])
-    y = torch.stack([torch.tensor(data["label"][i]) for i in range(len(ix))])
-    x, y = x.to(device), y.to(device)
+    data = dataset['train'] if split == 'train' else dataset['test']
+    ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
+    x = torch.tensor(data["img"][ix], dtype=torch.float)
+    y = torch.tensor(data["label"][ix], dtype=torch.long)
+    # x, y = x.to(device), y.to(device)
     return x, y
 
 @torch.no_grad()
