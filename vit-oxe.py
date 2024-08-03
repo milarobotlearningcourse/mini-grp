@@ -12,23 +12,23 @@ from tqdm import tqdm, trange
 import cv2
 
 # hyperparameters
-batch_size = 65 # how many independent sequences will we process in parallel?
+batch_size = 64 # how many independent sequences will we process in parallel?
 block_size = 32 # what is the maximum context length for predictions?
 vocab_size = n_patches = 8
 max_iters = 5000
 eval_interval = 100
-learning_rate = 1e-3
+learning_rate = 3e-4
 # device = 'cpu'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 128
+n_embd = 16
 # ------------
 
 torch.manual_seed(1337)
 n_head = 8
 n_blocks = 4
-dropout = 0.1
+dropout = 0.0
 
 ## Model hyperparameters
 action_bins = 10
@@ -41,14 +41,15 @@ ds = load_dataset("EleutherAI/cifarnet")
 # data = torch.tensor(ds)
 
 # np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
+trim = 10000000 ## Lets see how little data is needed to still get good performance. 1000 is not enough.
 dataset = {}
 dataset["train"]= {
-           "img": torch.tensor(np.array(ds["train"]["img"], dtype=np.uint8)).to(device),
-           "label": torch.tensor(np.array(ds["train"]["label"], dtype=np.uint8)).to(device) 
+           "img": torch.tensor(np.array(ds["train"]["img"][:trim], dtype=np.uint8)).to(device),
+           "label": torch.tensor(np.array(ds["train"]["label"][:trim], dtype=np.uint8)).to(device) 
           }         
 dataset["test"]=  {
-           "img": torch.tensor(np.array(ds["test"]["img"], dtype=np.uint8)).to(device),
-           "label": torch.tensor(np.array(ds["test"]["label"], dtype=np.uint8)).to(device)
+           "img": torch.tensor(np.array(ds["test"]["img"][:trim], dtype=np.uint8)).to(device),
+           "label": torch.tensor(np.array(ds["test"]["label"][:trim], dtype=np.uint8)).to(device)
          }
 
 # ------------
