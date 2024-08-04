@@ -231,7 +231,6 @@ class Block(nn.Module):
 class VIT(nn.Module):
   def __init__(self, mlp_ratio=4):
     super(VIT, self).__init__()
-    self.n_patches = 7
     # assert shape[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
     # assert shape[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
     self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
@@ -239,7 +238,8 @@ class VIT(nn.Module):
     #Positional embedding
     # self.pos_embed = nn.Parameter(torch.tensor(positional_embeddings(n_patches ** 2 + 1, embedding_size)))
     # self. pos_embed.requires_grad = False
-    self.register_buffer('positional_embeddings', calc_positional_embeddings(n_patches ** 2 + 1, n_embd), persistent=False)
+    # self.register_buffer('positional_embeddings', calc_positional_embeddings(n_patches ** 2 + 1, n_embd), persistent=False)
+    self.position_embedding_table = nn.Embedding(n_patches ** 2 + 1, n_embd)
     
     self.class_tokens = nn.Parameter(torch.rand(1, n_embd))
 
@@ -259,7 +259,7 @@ class VIT(nn.Module):
   def forward(self, images, targets=None):
     # Dividing images into patches
     n, c, h, w = images.shape
-    patches = get_patches_fast(images).to(self.positional_embeddings.device)
+    patches = get_patches_fast(images).to(device)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
@@ -269,7 +269,9 @@ class VIT(nn.Module):
     out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
     
     # Adding positional embedding
-    out = out + self.positional_embeddings.repeat(n, 1, 1)
+    # out = out + self.positional_embeddings.repeat(n, 1, 1)
+    pos_emb = self.position_embedding_table(torch.arange(n_patches ** 2 + 1, device=device)) # (T,C)
+    out = out + pos_emb
     
     # Transformer Blocks
     for block in self.blocks:
