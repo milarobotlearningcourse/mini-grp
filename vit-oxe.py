@@ -289,31 +289,47 @@ class VIT(nn.Module):
         loss = F.cross_entropy(logits, targets)
     return (logits, loss)
 
+if __name__ == "__main__":
+    import wandb
+    # start a new wandb run to track this script
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="mini-grp",
 
-model = VIT()
-m = model.to(device)
-# print the number of parameters in the model
-print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
+        # track hyperparameters and run metadata
+        config={
+        "learning_rate": 0.02,
+        "architecture": "VIT",
+        "dataset": "EleutherAI/cifarnet",
+        "epochs": max_iters,
+        }
+    )
+    model = VIT()
+    m = model.to(device)
+    # print the number of parameters in the model
+    print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
-# create a PyTorch optimizer
-optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    # create a PyTorch optimizer
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
-for iter in range(max_iters):
+    for iter in range(max_iters):
 
-    # every once in a while evaluate the loss on train and val sets
-    if iter % eval_interval == 0 or iter == max_iters - 1:
-        losses = estimate_loss()
-        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        # every once in a while evaluate the loss on train and val sets
+        if iter % eval_interval == 0 or iter == max_iters - 1:
+            losses = estimate_loss()
+            print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+            wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
-    # sample a batch of data
-    xb, yb = get_batch_vit('train')
+        # sample a batch of data
+        xb, yb = get_batch_vit('train')
 
-    # evaluate the loss
-    logits, loss = model(xb, yb)
-    optimizer.zero_grad(set_to_none=True)
-    loss.backward()
-    optimizer.step()
+        # evaluate the loss
+        logits, loss = model(xb, yb)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
 
-# generate from the model
-context = torch.zeros((1, 1), dtype=torch.long, device=device)
-# print(decode(m.generate(context, max_new_tokens=2000)[0].tolist()))
+    # generate from the model
+    context = torch.zeros((1, 1), dtype=torch.long, device=device)
+    # print(decode(m.generate(context, max_new_tokens=2000)[0].tolist()))
+    wandb.finish()
