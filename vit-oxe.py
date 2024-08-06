@@ -22,13 +22,13 @@ learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 16
+n_embd = 64
 # ------------
 
 torch.manual_seed(1337)
 n_head = 8
 n_blocks = 4
-dropout = 0.0
+dropout = 0.1
 
 ## Model hyperparameters
 action_bins = 10
