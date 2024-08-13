@@ -11,3 +11,4 @@ einops==0.8.0
 huggingface
 datasets
 Pillow==9.4.0
+wandb
