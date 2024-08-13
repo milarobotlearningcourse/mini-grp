@@ -43,19 +43,36 @@ from datasets import load_dataset
 num_episodes = 5 ## How many episodes to grab from the dataset for training
 builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridge/0.1.0/')
 datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
-dataset_tmp = {"img": [], "action": []}
+dataset_tmp = {"img": [], "action": [], "goal": []}
+shortest_goal_txt = 10000000000
 for episode in datasetRemote:
     episode_ = {'steps': [] }
     episode = list(episode['steps'])
     for i in range(len(episode)): ## Resize images to reduce computation
         obs = cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1])) 
         action = np.array(episode[i]['action']['world_vector'])
+        goal = episode[i]['observation']['natural_language_instruction'].numpy().decode()
         # action = torch.as_tensor(action) # grab first dimention
-        dataset_tmp["img"].append(torch.tensor(obs, dtype=torch.uint8))
-        dataset_tmp["action"].append(torch.tensor(action, dtype=torch.float32))
+        dataset_tmp["img"].append(obs)
+        dataset_tmp["action"].append(action)
+        dataset_tmp["goal"].append(goal)
+        if len(goal) < shortest_goal_txt: shortest_goal_txt = len(goal)
+
+# here are all the unique characters that occur in this text
+chars = sorted(list(set([item for row in dataset_tmp["goal"] for item in row]))) ## Flatten to a long string
+vocab_size = len(chars)
+# create a mapping from characters to integers
+stoi = { ch:i for i,ch in enumerate(chars) }
+itos = { i:ch for i,ch in enumerate(chars) }
+encode_txt = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list of integers
+decode_txy = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
+print("vocab_size:", vocab_size)
+print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
+
 print("Dataset shape:", len(dataset_tmp["img"]))
 dataset_tmp["img"] = np.array(dataset_tmp["img"], dtype=np.uint8)
 dataset_tmp["action"] = np.array(dataset_tmp["action"], dtype=np.float32)
+# dataset_tmp["goal"] = np.array(dataset_tmp["goal"], dtype=np.float32)
 
 
 ## Get the actions and encode them as well.
@@ -88,8 +105,10 @@ def get_batch(split):
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
     x = torch.tensor(data["img"][ix], dtype=torch.float)
     y = torch.tensor(data["label"][ix], dtype=torch.long)
+    goal_e = [encode_txt(data["goal"][ix[i]][:shortest_goal_txt]) for i in range(len(ix))]
+    x2 = torch.tensor(goal_e, dtype=torch.long)
     # x, y = x.to(device), y.to(device)
-    return x, y
+    return x, x2, y
 
 @torch.no_grad()
 def estimate_loss():
@@ -98,8 +117,8 @@ def estimate_loss():
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X, Y = get_batch(split)
-            logits, loss = model(X, Y)
+            X, X2, Y = get_batch(split)
+            logits, loss = model(X, X2, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -215,6 +234,10 @@ class Block(nn.Module):
 class VIT(nn.Module):
   def __init__(self, mlp_ratio=4):
     super(VIT, self).__init__()
+    ## Text processing portion
+    self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+    self.position_embedding_table_goal = nn.Embedding(block_size, n_embd)
+
     # assert shape[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
     # assert shape[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
     self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
@@ -237,10 +260,12 @@ class VIT(nn.Module):
         nn.Softmax(dim=-1)
     )
 
-  def forward(self, images, targets=None):
+  def forward(self, images, goals, targets=None):
     # Dividing images into patches
     n, c, h, w = images.shape
     patches = get_patches_fast(images).to(device)
+    goals = self.token_embedding_table(goals)
+    pos_emb_goal_txt = self.position_embedding_table(torch.arange(n, device=device)) # (T,C)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
@@ -305,10 +330,10 @@ if __name__ == "__main__":
             wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
         # sample a batch of data
-        xb, yb = get_batch('train')
+        xb, x2b, yb = get_batch('train')
 
         # evaluate the loss
-        logits, loss = model(xb, yb)
+        logits, loss = model(xb, x2b, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
