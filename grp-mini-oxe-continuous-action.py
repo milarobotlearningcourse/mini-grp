@@ -31,7 +31,7 @@ n_blocks = 4
 dropout = 0.1
 
 ## Model hyperparameters
-action_bins = 10
+action_bins = 3
 image_shape = [64, 64, 3]
 
 from datasets import load_dataset
@@ -77,27 +77,7 @@ dataset_tmp["action"] = np.array(dataset_tmp["action"], dtype=np.float32)
 # dataset_tmp["goal"] = np.array(dataset_tmp["goal"], dtype=np.float32)
 dataset_tmp["goal_img"] = np.array(dataset_tmp["goal_img"], dtype=np.uint8)
 
-
-## Get the actions and encode them as well.
-a_min = dataset_tmp["action"].min(axis=0) ## Get the min and max bound for the actions to use for bining 
-a_max = dataset_tmp["action"].max(axis=0) 
-hist, bin_edges = np.histogram(dataset_tmp["action"], density=True, bins=action_bins)
-print("action histogram:", hist)
-print("bin edges: ", bin_edges)
-# import matplotlib.pyplot as plt
-# import numpy as np
-# plt.hist(dataset_tmp["action"], bins=action_bins)  # arguments are passed to np.histogram
-# plt.title("Histogram with combuted bins")
-# plt.show()
-a_max = a_max + ((a_max - a_min) / float(action_bins * 2)) ## + a little to avoid using action_bins + 1 for the action = max
-spacing = (a_max - a_min)/float(action_bins)
-bins = [a_min + (spacing * i) for i in range(action_bins)]
-encode_action = lambda af:   np.floor((af - a_min)/spacing).astype(np.uint8) # encoder: take a float, output an integer
-decode_action = lambda binN: (binN * spacing) + a_min  # decoder: take a list of integers, output a string
-for i in range(len(dataset_tmp["action"])): ## Convert to classes
-    dataset_tmp["action"][i] = encode_action(dataset_tmp["action"][i])
-dataset_tmp["label"] = dataset_tmp["action"][:,:1] ## Grab just the first dimension for the action
-n = int(0.9*len(dataset_tmp["label"])) # first 90% will be train, rest val
+n = int(0.9*len(dataset_tmp["img"])) # first 90% will be train, rest val
 dataset = {"train": dataset_tmp, "test": dataset_tmp} 
 
 
@@ -108,7 +88,7 @@ def get_batch(split):
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
     x = torch.tensor(data["img"][ix], dtype=torch.float)
     x_goal_img = torch.tensor(data["goal_img"][ix], dtype=torch.float)
-    y = torch.tensor(data["label"][ix], dtype=torch.long)
+    y = torch.tensor(data["action"][ix], dtype=torch.float)
     goal_e = [encode_txt(data["goal"][ix[i]][:shortest_goal_txt]) for i in range(len(ix))]
     x2 = torch.tensor(goal_e, dtype=torch.long).to(device)
     return x.to(device), x2.to(device), x_goal_img.to(device), y.to(device)
@@ -258,10 +238,12 @@ class VIT(nn.Module):
     # 4) Transformer encoder blocks
     self.blocks = nn.ModuleList([Block(n_embd, n_head) for _ in range(n_blocks)])
 
-    # 5) Classification MLPk
+    # 5) Regression MLPk
     self.mlp = nn.Sequential(
         nn.Linear(n_embd, action_bins),
-        nn.Softmax(dim=-1)
+        # nn.Softmax(dim=-1)
+        # nn.ReLU(),
+        nn.Tanh()
     )
 
   def forward(self, images, goals, goal_img, targets):
@@ -301,13 +283,15 @@ class VIT(nn.Module):
         # B,T,C = 4,8,2 # batch, time, channels
         B, C = logits.shape
         # logits = logits.view(B*T, C)
-        targets = targets.view(B)
-        loss = F.cross_entropy(logits, targets)
+        # targets = targets.view(B)
+        loss = F.mse_loss(logits, targets)
     return (logits, loss)
 
 if __name__ == "__main__":
     import wandb
     # start a new wandb run to track this script
+    model = VIT()
+    m = model.to(device)
     wandb.init(
         # set the wandb project where this run will be logged
         project="mini-grp",
@@ -321,8 +305,6 @@ if __name__ == "__main__":
         }
     )
     wandb.run.log_code(".")
-    model = VIT()
-    m = model.to(device)
     # print the number of parameters in the model
     print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
@@ -334,7 +316,7 @@ if __name__ == "__main__":
         # every once in a while evaluate the loss on train and val sets
         if iter % eval_interval == 0 or iter == max_iters - 1:
             losses = estimate_loss()
-            print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+            print(f"step {iter}: train loss {losses['train']:.8f}, val loss {losses['val']:.8f}")
             wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
         # sample a batch of data
