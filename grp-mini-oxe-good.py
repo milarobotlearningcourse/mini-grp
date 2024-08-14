@@ -40,7 +40,7 @@ from datasets import load_dataset
 # Train and test splits
 # Loading data
 # create RLDS dataset builder
-num_episodes = 5 ## How many episodes to grab from the dataset for training
+num_episodes = 50 ## How many episodes to grab from the dataset for training
 builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridge/0.1.0/')
 datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
 dataset_tmp = {"img": [], "action": [], "goal": []}
@@ -243,7 +243,7 @@ class VIT(nn.Module):
     self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
 
     #Positional embedding
-    self.position_embedding_table = nn.Embedding(n_patches ** 2 + 1, n_embd)
+    self.position_embedding_table = nn.Embedding(block_size + (n_patches ** 2 + 1), n_embd)
     
     self.class_tokens = nn.Parameter(torch.rand(1, n_embd))
 
@@ -263,9 +263,9 @@ class VIT(nn.Module):
   def forward(self, images, goals, targets=None):
     # Dividing images into patches
     n, c, h, w = images.shape
+    B, T = goals.shape
     patches = get_patches_fast(images).to(device)
-    goals = self.token_embedding_table(goals)
-    pos_emb_goal_txt = self.position_embedding_table(torch.arange(n, device=device)) # (T,C)
+    goals_e = self.token_embedding_table(goals)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
@@ -273,10 +273,12 @@ class VIT(nn.Module):
     
     # Adding classification token to the tokens
     out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
+    out = torch.cat([goals_e, out], dim=1) ## Add text encoding to begining of encoding.
     
     # Adding positional embedding
     # out = out + self.positional_embeddings.repeat(n, 1, 1)
-    pos_emb = self.position_embedding_table(torch.arange(n_patches ** 2 + 1, device=device)) # (T,C)
+    # pos_emb_goal_txt = self.position_embedding_table(torch.arange(n, device=device)) # (T,C)
+    pos_emb = self.position_embedding_table(torch.arange(c + T + 1, device=device)) # (T,C)
     out = out + pos_emb
     
     # Transformer Blocks

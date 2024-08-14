@@ -143,7 +143,8 @@ class GPTLanguageModel(nn.Module):
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        ## Some details on position embeddings https://towardsdatascience.com/position-embeddings-for-vision-transformers-explained-a6f9add341d5
+        self.position_embedding_table = nn.Embedding(block_size, n_embd) 
         self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_blocks)])
         self.ln_f = nn.LayerNorm(n_embd) # final layer norm
         self.lm_head = nn.Linear(n_embd, vocab_size)
