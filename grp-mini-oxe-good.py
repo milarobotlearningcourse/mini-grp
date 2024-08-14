@@ -40,14 +40,15 @@ from datasets import load_dataset
 # Train and test splits
 # Loading data
 # create RLDS dataset builder
-num_episodes = 50 ## How many episodes to grab from the dataset for training
+num_episodes = 5 ## How many episodes to grab from the dataset for training
 builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridge/0.1.0/')
 datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
-dataset_tmp = {"img": [], "action": [], "goal": []}
+dataset_tmp = {"img": [], "action": [], "goal": [], "goal_img": []}
 shortest_goal_txt = 10000000000
 for episode in datasetRemote:
     episode_ = {'steps': [] }
     episode = list(episode['steps'])
+    goal_img = cv2.resize(np.array(episode[-1]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1]))  
     for i in range(len(episode)): ## Resize images to reduce computation
         obs = cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1])) 
         action = np.array(episode[i]['action']['world_vector'])
@@ -56,6 +57,7 @@ for episode in datasetRemote:
         dataset_tmp["img"].append(obs)
         dataset_tmp["action"].append(action)
         dataset_tmp["goal"].append(goal)
+        dataset_tmp["goal_img"].append(goal_img)
         if len(goal) < shortest_goal_txt: shortest_goal_txt = len(goal)
 
 # here are all the unique characters that occur in this text
@@ -73,6 +75,7 @@ print("Dataset shape:", len(dataset_tmp["img"]))
 dataset_tmp["img"] = np.array(dataset_tmp["img"], dtype=np.uint8)
 dataset_tmp["action"] = np.array(dataset_tmp["action"], dtype=np.float32)
 # dataset_tmp["goal"] = np.array(dataset_tmp["goal"], dtype=np.float32)
+dataset_tmp["goal_img"] = np.array(dataset_tmp["goal_img"], dtype=np.uint8)
 
 
 ## Get the actions and encode them as well.
@@ -104,11 +107,11 @@ def get_batch(split):
     data = dataset['train'] if split == 'train' else dataset['test']
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
     x = torch.tensor(data["img"][ix], dtype=torch.float)
+    x_goal_img = torch.tensor(data["goal_img"][ix], dtype=torch.float)
     y = torch.tensor(data["label"][ix], dtype=torch.long)
     goal_e = [encode_txt(data["goal"][ix[i]][:shortest_goal_txt]) for i in range(len(ix))]
-    x2 = torch.tensor(goal_e, dtype=torch.long)
-    # x, y = x.to(device), y.to(device)
-    return x, x2, y
+    x2 = torch.tensor(goal_e, dtype=torch.long).to(device)
+    return x.to(device), x2.to(device), x_goal_img.to(device), y.to(device)
 
 @torch.no_grad()
 def estimate_loss():
@@ -117,8 +120,8 @@ def estimate_loss():
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X, X2, Y = get_batch(split)
-            logits, loss = model(X, X2, Y)
+            X, X2, X3, Y = get_batch(split)
+            logits, loss = model(X, X2, X3, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -236,20 +239,21 @@ class VIT(nn.Module):
     super(VIT, self).__init__()
     ## Text processing portion
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-    self.position_embedding_table_goal = nn.Embedding(block_size, n_embd)
+    # self.position_embedding_table_goal = nn.Embedding(block_size, n_embd)
 
     # assert shape[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
     # assert shape[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
     self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
 
     #Positional embedding
-    self.position_embedding_table = nn.Embedding(block_size + (n_patches ** 2 + 1), n_embd)
+    self.position_embedding_table = nn.Embedding(block_size + (n_patches ** 2) + (n_patches ** 2) + 1, n_embd)
     
     self.class_tokens = nn.Parameter(torch.rand(1, n_embd))
 
     self.input_d = int(image_shape[2] * self.patch_size[0] * self.patch_size[1])
 
     self.lin_map = nn.Linear(self.input_d, n_embd, bias=False) 
+    self.lin_map_goal_img = nn.Linear(self.input_d, n_embd, bias=False) 
 
     # 4) Transformer encoder blocks
     self.blocks = nn.ModuleList([Block(n_embd, n_head) for _ in range(n_blocks)])
@@ -260,25 +264,27 @@ class VIT(nn.Module):
         nn.Softmax(dim=-1)
     )
 
-  def forward(self, images, goals, targets=None):
+  def forward(self, images, goals, goal_img, targets):
     # Dividing images into patches
     n, c, h, w = images.shape
     B, T = goals.shape
     patches = get_patches_fast(images).to(device)
+    patches_goal_img = get_patches_fast(goal_img).to(device)
     goals_e = self.token_embedding_table(goals)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
     out = self.lin_map(patches)
+    out_goal_img = self.lin_map(patches_goal_img)
     
     # Adding classification token to the tokens
     out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
-    out = torch.cat([goals_e, out], dim=1) ## Add text encoding to begining of encoding.
+    out = torch.cat([out_goal_img, goals_e, out], dim=1) ## Add text and goal image encoding to begining of encoding.
     
     # Adding positional embedding
     # out = out + self.positional_embeddings.repeat(n, 1, 1)
     # pos_emb_goal_txt = self.position_embedding_table(torch.arange(n, device=device)) # (T,C)
-    pos_emb = self.position_embedding_table(torch.arange(c + T + 1, device=device)) # (T,C)
+    pos_emb = self.position_embedding_table(torch.arange(T + c + c + 1, device=device)) # (T,C)
     out = out + pos_emb
     
     # Transformer Blocks
@@ -308,7 +314,7 @@ if __name__ == "__main__":
 
         # track hyperparameters and run metadata
         config={
-        "learning_rate": 0.02,
+        "learning_rate": learning_rate,
         "architecture": "VIT",
         "dataset": "EleutherAI/cifarnet",
         "epochs": max_iters,
@@ -332,10 +338,10 @@ if __name__ == "__main__":
             wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
         # sample a batch of data
-        xb, x2b, yb = get_batch('train')
+        xb, x2b, x3b, yb = get_batch('train')
 
         # evaluate the loss
-        logits, loss = model(xb, x2b, yb)
+        logits, loss = model(xb, x2b, x3b, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
