@@ -33,6 +33,7 @@ dropout = 0.1
 ## Model hyperparameters
 action_bins = 3
 image_shape = [64, 64, 3]
+num_episodes = 25 ## How many episodes to grab from the dataset for training
 
 from datasets import load_dataset
 
@@ -40,7 +41,6 @@ from datasets import load_dataset
 # Train and test splits
 # Loading data
 # create RLDS dataset builder
-num_episodes = 5 ## How many episodes to grab from the dataset for training
 builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridge/0.1.0/')
 datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
 dataset_tmp = {"img": [], "action": [], "goal": [], "goal_img": []}
@@ -76,6 +76,16 @@ dataset_tmp["img"] = np.array(dataset_tmp["img"], dtype=np.uint8)
 dataset_tmp["action"] = np.array(dataset_tmp["action"], dtype=np.float32)
 # dataset_tmp["goal"] = np.array(dataset_tmp["goal"], dtype=np.float32)
 dataset_tmp["goal_img"] = np.array(dataset_tmp["goal_img"], dtype=np.uint8)
+
+
+## Get the actions and encode them to map to [-1, 1]
+a_min = dataset_tmp["action"].min(axis=0) - 0.001 ## Get the min and max bound for the actions to use for bining 
+a_max = dataset_tmp["action"].max(axis=0) 
+a_max = a_max + ((a_max - a_min) / 20.0) ## + a little to avoid using action_bins + 1 for the action = max
+encode_action = lambda af:   (((af - a_min)/(a_max - a_min))).astype(np.float32) # encoder: take a float, output an integer
+# decode_action = lambda binN: (binN ) + a_min  # Undo mapping to [-1, 1]
+for i in range(len(dataset_tmp["action"])): ## Convert to classes
+    dataset_tmp["action"][i] = encode_action(dataset_tmp["action"][i])
 
 n = int(0.9*len(dataset_tmp["img"])) # first 90% will be train, rest val
 dataset = {"train": dataset_tmp, "test": dataset_tmp} 
@@ -243,7 +253,8 @@ class VIT(nn.Module):
         nn.Linear(n_embd, action_bins),
         # nn.Softmax(dim=-1)
         # nn.ReLU(),
-        nn.Tanh()
+        # nn.Tanh()
+        nn.Sigmoid()
     )
 
   def forward(self, images, goals, goal_img, targets):
