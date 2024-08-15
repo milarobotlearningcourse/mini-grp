@@ -33,7 +33,7 @@ dropout = 0.1
 ## Model hyperparameters
 action_bins = 3
 image_shape = [64, 64, 3]
-num_episodes = 25 ## How many episodes to grab from the dataset for training
+num_episodes = 5 ## How many episodes to grab from the dataset for training
 
 from datasets import load_dataset
 
@@ -90,6 +90,10 @@ for i in range(len(dataset_tmp["action"])): ## Convert to classes
 n = int(0.9*len(dataset_tmp["img"])) # first 90% will be train, rest val
 dataset = {"train": dataset_tmp, "test": dataset_tmp} 
 
+from datasets import Dataset
+ds = Dataset.from_dict(dataset)
+print("Dataset: ", ds)
+ds.push_to_hub("gberseth/mini-oxe")
 
 # data loading
 def get_batch(split):
