@@ -33,7 +33,7 @@ dropout = 0.1
 ## Model hyperparameters
 action_bins = 3
 image_shape = [64, 64, 3]
-num_episodes = 5 ## How many episodes to grab from the dataset for training
+num_episodes = 3 ## How many episodes to grab from the dataset for training
 
 from datasets import load_dataset
 
@@ -89,11 +89,6 @@ for i in range(len(dataset_tmp["action"])): ## Convert to classes
 
 n = int(0.9*len(dataset_tmp["img"])) # first 90% will be train, rest val
 dataset = {"train": dataset_tmp, "test": dataset_tmp} 
-
-from datasets import Dataset
-ds = Dataset.from_dict(dataset)
-print("Dataset: ", ds)
-ds.push_to_hub("gberseth/mini-oxe")
 
 # data loading
 def get_batch(split):
@@ -168,7 +163,7 @@ class Head(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         B,T,C = x.shape
         k = self.key(x)   # (B,T,C)
         q = self.query(x) # (B,T,C)
@@ -231,6 +226,8 @@ class Block(nn.Module):
 class VIT(nn.Module):
   def __init__(self, mlp_ratio=4):
     super(VIT, self).__init__()
+
+    self.register_buffer('attention_mask', torch.ones(block_size + (n_patches ** 2) + (n_patches ** 2) + 1 ))
     ## Text processing portion
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
     # self.position_embedding_table_goal = nn.Embedding(block_size, n_embd)
@@ -282,6 +279,8 @@ class VIT(nn.Module):
     # out = out + self.positional_embeddings.repeat(n, 1, 1)
     # pos_emb_goal_txt = self.position_embedding_table(torch.arange(n, device=device)) # (T,C)
     pos_emb = self.position_embedding_table(torch.arange(T + c + c + 1, device=device)) # (T,C)
+    mask = torch.ones((T + c + c + 1, ), device=device) ## (1, T)
+    mask[0:T] = torch.zeros((1,T), device=device)
     out = out + pos_emb
     
     # Transformer Blocks
