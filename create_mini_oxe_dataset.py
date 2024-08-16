@@ -21,7 +21,7 @@ learning_rate = 3e-4
 # device = 'cpu'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
-eval_iters = 200
+eval_iters = 20
 n_embd = 64
 # ------------
 
@@ -33,7 +33,7 @@ dropout = 0.1
 ## Model hyperparameters
 action_bins = 3
 image_shape = [64, 64, 3]
-num_episodes = 200 ## How many episodes to grab from the dataset for training
+num_episodes = 20 ## How many episodes to grab from the dataset for training
 
 from datasets import load_dataset
 
@@ -80,6 +80,6 @@ dataset_tmp["goal_img"] = np.array(dataset_tmp["goal_img"], dtype=np.uint8)
 dataset = {"train": dataset_tmp} 
 
 from datasets import Dataset
-ds = Dataset.from_dict(dataset)
+ds = Dataset.from_dict(dataset_tmp)
 print("Dataset: ", ds)
 ds.push_to_hub("gberseth/mini-oxe")

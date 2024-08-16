@@ -36,29 +36,16 @@ image_shape = [64, 64, 3]
 num_episodes = 3 ## How many episodes to grab from the dataset for training
 
 from datasets import load_dataset
+dataset = load_dataset("gberseth/mini-oxe", split='train')
+dataset_tmp = {
+    "img": np.array(dataset["img"]),
+    "action": np.array(dataset["action"]),
+    "goal_img": np.array(dataset["goal_img"]),
+    "goal": dataset["goal"]
+}
+shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
 
-# ------------
-# Train and test splits
-# Loading data
-# create RLDS dataset builder
-builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridge/0.1.0/')
-datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
-dataset_tmp = {"img": [], "action": [], "goal": [], "goal_img": []}
-shortest_goal_txt = 10000000000
-for episode in datasetRemote:
-    episode_ = {'steps': [] }
-    episode = list(episode['steps'])
-    goal_img = cv2.resize(np.array(episode[-1]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1]))  
-    for i in range(len(episode)): ## Resize images to reduce computation
-        obs = cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1])) 
-        action = np.array(episode[i]['action']['world_vector'])
-        goal = episode[i]['observation']['natural_language_instruction'].numpy().decode()
-        # action = torch.as_tensor(action) # grab first dimention
-        dataset_tmp["img"].append(obs)
-        dataset_tmp["action"].append(action)
-        dataset_tmp["goal"].append(goal)
-        dataset_tmp["goal_img"].append(goal_img)
-        if len(goal) < shortest_goal_txt: shortest_goal_txt = len(goal)
+print("Dataset shape:", len(dataset_tmp["img"]))
 
 # here are all the unique characters that occur in this text
 chars = sorted(list(set([item for row in dataset_tmp["goal"] for item in row]))) ## Flatten to a long string
@@ -70,13 +57,6 @@ encode_txt = lambda s: [stoi[c] for c in s] # encoder: take a string, output a l
 decode_txy = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
 print("vocab_size:", vocab_size)
 print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
-
-print("Dataset shape:", len(dataset_tmp["img"]))
-dataset_tmp["img"] = np.array(dataset_tmp["img"], dtype=np.uint8)
-dataset_tmp["action"] = np.array(dataset_tmp["action"], dtype=np.float32)
-# dataset_tmp["goal"] = np.array(dataset_tmp["goal"], dtype=np.float32)
-dataset_tmp["goal_img"] = np.array(dataset_tmp["goal_img"], dtype=np.uint8)
-
 
 ## Get the actions and encode them to map to [-1, 1]
 a_min = dataset_tmp["action"].min(axis=0) - 0.001 ## Get the min and max bound for the actions to use for bining 
@@ -165,10 +145,15 @@ class Head(nn.Module):
 
     def forward(self, x, mask=None):
         B,T,C = x.shape
+        if mask == None:
+            mask = torch.ones((T, ), device=device) ## (1, T)
         k = self.key(x)   # (B,T,C)
         q = self.query(x) # (B,T,C)
         # compute attention scores ("affinities")
         wei = q @ k.transpose(-2,-1) * C**-0.5 # (B, T, C) @ (B, C, T) -> (B, T, T)
+        ### Block masked attention
+        wei = wei.masked_fill(mask == 0, float('-inf')) # (B, T, T)
+        ### Decoder attention
         # wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # (B, T, T) ## Remove masking
         wei = F.softmax(wei, dim=-1) # (B, T, T)
         wei = self.dropout(wei)
@@ -186,8 +171,8 @@ class MultiHeadAttention(nn.Module):
         self.proj = nn.Linear(n_embd, n_embd)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
-        out = torch.cat([h(x) for h in self.heads], dim=-1)
+    def forward(self, x, mask=None):
+        out = torch.cat([h(x, mask) for h in self.heads], dim=-1)
         out = self.dropout(self.proj(out))
         return out
 
@@ -218,8 +203,8 @@ class Block(nn.Module):
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
 
-    def forward(self, x):
-        x = x + self.sa(self.ln1(x))
+    def forward(self, x, mask=None):
+        x = x + self.sa(self.ln1(x), mask)
         x = x + self.ffwd(self.ln2(x))
         return x
 
@@ -273,19 +258,24 @@ class VIT(nn.Module):
     
     # Adding classification token to the tokens
     out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
-    out = torch.cat([out_goal_img, goals_e, out], dim=1) ## Add text and goal image encoding to begining of encoding.
+    out = torch.cat([goals_e, out_goal_img, out], dim=1) ## Add text and goal image encoding to begining of encoding.
     
     # Adding positional embedding
     # out = out + self.positional_embeddings.repeat(n, 1, 1)
     # pos_emb_goal_txt = self.position_embedding_table(torch.arange(n, device=device)) # (T,C)
     pos_emb = self.position_embedding_table(torch.arange(T + c + c + 1, device=device)) # (T,C)
-    mask = torch.ones((T + c + c + 1, ), device=device) ## (1, T)
-    mask[0:T] = torch.zeros((1,T), device=device)
     out = out + pos_emb
-    
+
+    ## Compute blocked masks
+    mask = torch.ones((T + c + c + 1, ), device=device) ## (1, T)
+    if (torch.rand(1)[0] > 0.66):  
+        mask[0:T] = torch.zeros((1,T), device=device) ## Mask goal string
+    elif (torch.rand(1)[0] > 0.33):
+        mask[block_size:block_size+c] = torch.zeros((1,c), device=device) ## Mask goal image
+    # print("mask:", mask)
     # Transformer Blocks
     for block in self.blocks:
-        out = block(out)
+        out = block(out, mask)
 
     # Getting the classification token only
     out = out[:, 0]
