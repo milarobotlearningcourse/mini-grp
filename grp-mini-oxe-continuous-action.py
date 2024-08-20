@@ -36,7 +36,7 @@ image_shape = [64, 64, 3]
 num_episodes = 3 ## How many episodes to grab from the dataset for training
 
 from datasets import load_dataset
-dataset = load_dataset("gberseth/mini-oxe", split='train')
+dataset = load_dataset("gberseth/mini-oxe", split='train[0:1000]')
 dataset_tmp = {
     "img": np.array(dataset["img"]),
     "action": np.array(dataset["action"]),
@@ -61,9 +61,10 @@ print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 ## Get the actions and encode them to map to [-1, 1]
 a_min = dataset_tmp["action"].min(axis=0) - 0.001 ## Get the min and max bound for the actions to use for bining 
 a_max = dataset_tmp["action"].max(axis=0) 
+a_std, a_mean = dataset_tmp["action"].std(axis=0), dataset_tmp["action"].mean(axis=0) 
 a_max = a_max + ((a_max - a_min) / 20.0) ## + a little to avoid using action_bins + 1 for the action = max
-encode_action = lambda af:   (((af - a_min)/(a_max - a_min))).astype(np.float32) # encoder: take a float, output an integer
-# decode_action = lambda binN: (binN ) + a_min  # Undo mapping to [-1, 1]
+encode_action = lambda af:   (((af - a_mean)/(a_std))).astype(np.float32) # encoder: take a float, output an integer
+decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
 for i in range(len(dataset_tmp["action"])): ## Convert to classes
     dataset_tmp["action"][i] = encode_action(dataset_tmp["action"][i])
 
