@@ -345,9 +345,9 @@ if __name__ == "__main__":
                 # action[:3]: delta xyz; action[3:6]: delta rotation in axis-angle representation;
                 # action[6:7]: gripper (the meaning of open / close depends on robot URDF)
                 image = get_image_from_maniskill2_obs_dict(env, obs)
-                action = model.forward(np.array([encode_state(resize_state(image))]), 
-                                       np.array([instruction]),
-                                       np.array([encode_state(resize_state(image))]))
+                action = model.forward(torch.tensor(np.array([encode_state(resize_state(image))])).to(device), 
+                                       torch.tensor(np.array([encode_txt(instruction)])).to(device),
+                                       torch.tensor(np.array([encode_state(resize_state(image))]))).to(device)
                 # action = env.action_space.sample() # replace this with your policy inference
                 obs, reward, done, truncated, info = env.step(decode_action(action))
                 frames.append(image)
