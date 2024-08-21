@@ -276,7 +276,9 @@ class VIT(nn.Module):
 
     ## Compute blocked masks
     mask = torch.ones((T + c + c + 1, ), device=device) ## (1, T)
-    if (torch.rand(1)[0] > 0.66):  
+    if targets is None:
+        pass
+    elif (torch.rand(1)[0] > 0.66):  
         mask[0:T] = torch.zeros((1,T), device=device) ## Mask goal string
     elif (torch.rand(1)[0] > 0.33):
         mask[block_size:block_size+c] = torch.zeros((1,c), device=device) ## Mask goal image
@@ -361,6 +363,7 @@ if __name__ == "__main__":
             import moviepy.editor as mpy
             clip = mpy.ImageSequenceClip(list(frames), fps=20)
             clip.write_videofile("./data/sim-env-"+str(0)+".mp4", fps=20)
+            wandb.log({"example": wandb.Video("./data/sim-env-"+str(0)+".mp4")})
 
         # sample a batch of data
         xb, x2b, x3b, yb = get_batch('train')
