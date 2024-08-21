@@ -31,15 +31,17 @@ n_blocks = 4
 dropout = 0.1
 
 ## Model hyperparameters
-action_bins = 3
+action_bins = 7
 image_shape = [64, 64, 3]
 num_episodes = 3 ## How many episodes to grab from the dataset for training
 
 from datasets import load_dataset
-dataset = load_dataset("gberseth/mini-oxe", split='train[0:1000]')
+dataset = load_dataset("gberseth/mini-oxe-test", split='train[0:500]')
 dataset_tmp = {
     "img": np.array(dataset["img"]),
-    "action": np.array(dataset["action"]),
+    "action": np.concatenate((np.array(dataset["action"]), 
+                              np.array(dataset["rotation_delta"]), 
+                              np.array(dataset["open_gripper"])), axis=1),
     "goal_img": np.array(dataset["goal_img"]),
     "goal": dataset["goal"]
 }
@@ -61,12 +63,17 @@ print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 ## Get the actions and encode them to map to [-1, 1]
 a_min = dataset_tmp["action"].min(axis=0) - 0.001 ## Get the min and max bound for the actions to use for bining 
 a_max = dataset_tmp["action"].max(axis=0) 
-a_std, a_mean = dataset_tmp["action"].std(axis=0), dataset_tmp["action"].mean(axis=0) 
+a_std, a_mean = dataset_tmp["action"].std(axis=0), dataset_tmp["action"].mean(axis=0)
+s_std, s_mean = dataset_tmp["img"].std(axis=0), dataset_tmp["img"].mean(axis=0) 
 a_max = a_max + ((a_max - a_min) / 20.0) ## + a little to avoid using action_bins + 1 for the action = max
 encode_action = lambda af:   (((af - a_mean)/(a_std))).astype(np.float32) # encoder: take a float, output an integer
+encode_state = lambda af:   (((af - s_mean)/(s_std))).astype(np.float32) # encoder: take a float, output an integer
+resize_state = lambda sf:   cv2.resize(np.array(sf, dtype=np.float32), (image_shape[0], image_shape[1]))  # resize state
 decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
-for i in range(len(dataset_tmp["action"])): ## Convert to classes
-    dataset_tmp["action"][i] = encode_action(dataset_tmp["action"][i])
+# for i in range(len(dataset_tmp["action"])): ## Convert to classes
+dataset_tmp["action"] = encode_action(dataset_tmp["action"])
+dataset_tmp["img"] = encode_state(dataset_tmp["img"])
+dataset_tmp["goal_img"] = encode_state(dataset_tmp["goal_img"])
 
 n = int(0.9*len(dataset_tmp["img"])) # first 90% will be train, rest val
 dataset = {"train": dataset_tmp, "test": dataset_tmp} 
@@ -244,7 +251,7 @@ class VIT(nn.Module):
         nn.Sigmoid()
     )
 
-  def forward(self, images, goals, goal_img, targets):
+  def forward(self, images, goals, goal_img, targets=None):
     # Dividing images into patches
     n, c, h, w = images.shape
     B, T = goals.shape
@@ -315,12 +322,38 @@ if __name__ == "__main__":
 
     # create a PyTorch optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-
+    import simpler_env
+    from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
+    task_name = "google_robot_pick_coke_can"  # @param ["google_robot_pick_coke_can", "google_robot_move_near", "google_robot_open_drawer", "google_robot_close_drawer", "widowx_spoon_on_towel", "widowx_carrot_on_plate", "widowx_stack_cube", "widowx_put_eggplant_in_basket"]
+    if 'env' in locals():
+        print("Closing existing env")
+        env.close()
+        del env
+    env = simpler_env.make(task_name)
     for iter in range(max_iters):
 
         # every once in a while evaluate the loss on train and val sets
         if iter % eval_interval == 0 or iter == max_iters - 1:
             losses = estimate_loss()
+            obs, reset_info = env.reset()
+            instruction = env.get_language_instruction()
+            print("Reset info", reset_info)
+            print("Instruction", instruction)
+            frames = []
+            done, truncated = False, False
+            while not (done or truncated):
+                # action[:3]: delta xyz; action[3:6]: delta rotation in axis-angle representation;
+                # action[6:7]: gripper (the meaning of open / close depends on robot URDF)
+                image = get_image_from_maniskill2_obs_dict(env, obs)
+                action = model.forward(np.array([encode_state(resize_state(image))]), 
+                                       np.array([instruction]),
+                                       np.array([encode_state(resize_state(image))]))
+                # action = env.action_space.sample() # replace this with your policy inference
+                obs, reward, done, truncated, info = env.step(decode_action(action))
+                frames.append(image)
+            
+            episode_stats = info.get('episode_stats', {})
+            print("Episode stats", episode_stats)
             print(f"step {iter}: train loss {losses['train']:.8f}, val loss {losses['val']:.8f}")
             wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 

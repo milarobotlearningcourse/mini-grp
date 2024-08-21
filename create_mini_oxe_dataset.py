@@ -33,7 +33,7 @@ dropout = 0.1
 ## Model hyperparameters
 action_bins = 3
 image_shape = [64, 64, 3]
-num_episodes = 200 ## How many episodes to grab from the dataset for training
+num_episodes = 20 ## How many episodes to grab from the dataset for training
 
 from datasets import load_dataset
 
@@ -43,7 +43,8 @@ from datasets import load_dataset
 # create RLDS dataset builder
 builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridge/0.1.0/')
 datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
-dataset_tmp = {"img": [], "action": [], "goal": [], "goal_img": []}
+dataset_tmp = {"img": [], "action": [], "goal": [], "goal_img": [],
+                "rotation_delta": [], "open_gripper": [] }
 shortest_goal_txt = 10000000000
 for episode in datasetRemote:
     episode_ = {'steps': [] }
@@ -51,11 +52,12 @@ for episode in datasetRemote:
     goal_img = cv2.resize(np.array(episode[-1]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1]))  
     for i in range(len(episode)): ## Resize images to reduce computation
         obs = cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1])) 
-        action = np.array(episode[i]['action']['world_vector'])
         goal = episode[i]['observation']['natural_language_instruction'].numpy().decode()
         # action = torch.as_tensor(action) # grab first dimention
         dataset_tmp["img"].append(obs)
-        dataset_tmp["action"].append(action)
+        dataset_tmp["action"].append(np.array(episode[i]['action']['world_vector']))
+        dataset_tmp["rotation_delta"].append(np.array(episode[i]['action']['rotation_delta']))
+        dataset_tmp["open_gripper"].append(np.array(episode[i]['action']['open_gripper']))
         dataset_tmp["goal"].append(goal)
         dataset_tmp["goal_img"].append(goal_img)
         if len(goal) < shortest_goal_txt: shortest_goal_txt = len(goal)

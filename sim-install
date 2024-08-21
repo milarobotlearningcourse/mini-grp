@@ -1,0 +1,8 @@
+#!/bin/bash
+
+pip install orbax-checkpoint==0.4.4
+git clone https://github.com/simpler-env/ManiSkill2_real2sim.git
+pip install -e ./ManiSkill2_real2sim
+git clone https://github.com/simpler-env/SimplerEnv.git
+pip install -e ./SimplerEnv
+mkdir ./SimplerEnv/checkpoints
