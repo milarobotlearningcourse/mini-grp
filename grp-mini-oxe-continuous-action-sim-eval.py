@@ -322,13 +322,45 @@ if __name__ == "__main__":
 
     # create a PyTorch optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    import simpler_env
+    from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
+    task_name = "widowx_carrot_on_plate"  # @param ["google_robot_pick_coke_can", "google_robot_move_near", "google_robot_open_drawer", "google_robot_close_drawer", "widowx_spoon_on_towel", "widowx_carrot_on_plate", "widowx_stack_cube", "widowx_put_eggplant_in_basket"]
+    if 'env' in locals():
+        print("Closing existing env")
+        env.close()
+        del env
+    env = simpler_env.make(task_name)
     for iter in range(max_iters):
 
         # every once in a while evaluate the loss on train and val sets
         if iter % eval_interval == 0 or iter == max_iters - 1:
             losses = estimate_loss()
-            print(f"step {iter}: train loss {losses['train']:.8f}, val loss {losses['val']:.8f}")
-            wandb.log({"train loss": losses['train'], "val loss": losses['val']})
+            obs, reset_info = env.reset()
+            instruction = env.get_language_instruction()
+            print("Reset info", reset_info)
+            print("Instruction", instruction)
+            frames, rewards = [], []
+            done, truncated = False, False
+            while not (done or truncated):
+                # action[:3]: delta xyz; action[3:6]: delta rotation in axis-angle representation;
+                # action[6:7]: gripper (the meaning of open / close depends on robot URDF)
+                image = get_image_from_maniskill2_obs_dict(env, obs)
+                action, loss = model.forward(torch.tensor(np.array([encode_state(resize_state(image))])).to(device), 
+                                       torch.tensor(np.array([encode_txt(instruction)])).to(device),
+                                       torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
+                                       )
+                # action = env.action_space.sample() # replace this with your policy inference
+                obs, reward, done, truncated, info = env.step(decode_action(action.cpu().detach().numpy()[0]))
+                frames.append(image)
+                rewards.append(reward)
+            
+            episode_stats = info.get('episode_stats', {})
+            print("Episode stats", episode_stats)
+            print(f"step {iter}: train loss {losses['train']:.8f}, val loss {losses['val']:.8f}, avg reward {np.mean(rewards):.8f}")
+            wandb.log({"train loss": losses['train'], "val loss": losses['val'], "avg reward": np.mean(rewards)})
+            import moviepy.editor as mpy
+            clip = mpy.ImageSequenceClip(list(frames), fps=20)
+            clip.write_videofile("./data/sim-env-"+str(0)+".mp4", fps=20)
 
         # sample a batch of data
         xb, x2b, x3b, yb = get_batch('train')

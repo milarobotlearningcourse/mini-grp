@@ -2,3 +2,7 @@ dataset/
 datasets/
 savedDatasets/
 wandb/
+SimplerEnv/
+ManiSkill2_real2sim/
+videos
+data
