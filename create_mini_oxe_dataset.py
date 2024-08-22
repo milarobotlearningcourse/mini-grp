@@ -31,7 +31,6 @@ n_blocks = 4
 dropout = 0.1
 
 ## Model hyperparameters
-action_bins = 3
 image_shape = [64, 64, 3]
 num_episodes = 20 ## How many episodes to grab from the dataset for training
 

@@ -22,7 +22,7 @@ learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 64
+n_embd = 256
 # ------------
 
 torch.manual_seed(1337)
@@ -41,7 +41,7 @@ ds = load_dataset("EleutherAI/cifarnet")
 # data = torch.tensor(ds)
 
 # np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
-trim = 100 ## Lets see how little data is needed to still get good performance. 1000 is not enough.
+trim = 1000000 ## Lets see how little data is needed to still get good performance. 1000 is not enough.
 dataset = {}
 dataset["train"]= {
            "img": torch.tensor(np.array(ds["train"]["img"][:trim], dtype=np.uint8)).to(device),
@@ -263,7 +263,7 @@ if __name__ == "__main__":
     # start a new wandb run to track this script
     wandb.init(
         # set the wandb project where this run will be logged
-        project="mini-grp",
+        project="mini-vit",
 
         # track hyperparameters and run metadata
         config={

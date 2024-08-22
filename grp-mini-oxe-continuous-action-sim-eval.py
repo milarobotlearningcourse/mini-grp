@@ -22,7 +22,7 @@ learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 64
+n_embd = 128
 # ------------
 
 torch.manual_seed(1337)
@@ -67,13 +67,13 @@ a_std, a_mean = dataset_tmp["action"].std(axis=0), dataset_tmp["action"].mean(ax
 s_std, s_mean = dataset_tmp["img"].std(axis=0), dataset_tmp["img"].mean(axis=0) 
 a_max = a_max + ((a_max - a_min) / 20.0) ## + a little to avoid using action_bins + 1 for the action = max
 encode_action = lambda af:   (((af - a_mean)/(a_std))).astype(np.float32) # encoder: take a float, output an integer
-encode_state = lambda af:   (((af - s_mean)/(s_std))).astype(np.float32) # encoder: take a float, output an integer
+encode_state = lambda af:   (af/(255.0)).astype(np.float32) # encoder: take a float, output an integer
 resize_state = lambda sf:   cv2.resize(np.array(sf, dtype=np.float32), (image_shape[0], image_shape[1]))  # resize state
 decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
 # for i in range(len(dataset_tmp["action"])): ## Convert to classes
 dataset_tmp["action"] = encode_action(dataset_tmp["action"])
-dataset_tmp["img"] = encode_state(dataset_tmp["img"])
-dataset_tmp["goal_img"] = encode_state(dataset_tmp["goal_img"])
+# dataset_tmp["img"] = dataset_tmp["img"]
+# dataset_tmp["goal_img"] = dataset_tmp["goal_img"]
 
 n = int(0.9*len(dataset_tmp["img"])) # first 90% will be train, rest val
 dataset = {"train": dataset_tmp, "test": dataset_tmp} 
@@ -83,8 +83,8 @@ def get_batch(split):
     # generate a small batch of inputs x and targets y
     data = dataset['train'] if split == 'train' else dataset['test']
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
-    x = torch.tensor(data["img"][ix], dtype=torch.float)
-    x_goal_img = torch.tensor(data["goal_img"][ix], dtype=torch.float)
+    x = torch.tensor(encode_state(data["img"][ix]), dtype=torch.float)
+    x_goal_img = torch.tensor(encode_state(data["goal_img"][ix]), dtype=torch.float)
     y = torch.tensor(data["action"][ix], dtype=torch.float)
     goal_e = [encode_txt(data["goal"][ix[i]][:shortest_goal_txt]) for i in range(len(ix))]
     x2 = torch.tensor(goal_e, dtype=torch.long).to(device)
@@ -104,23 +104,6 @@ def estimate_loss():
     model.train()
     return out
 
-def get_patches(images):
-  batch_size, channels, height, width = images.shape
-
-  assert height == width, "square images only"
-
-  patches = torch.zeros(batch_size, n_patches ** 2, height * width * channels // n_patches ** 2)
-  patch_size = height // n_patches
-
-  for idx, image in enumerate(images):
-      for row in range(n_patches):
-          for column in range(n_patches):
-            ## Channel first
-            patch = image[:, row * patch_size: (row + 1) * patch_size, column * patch_size: (column + 1) * patch_size]
-            patches[idx, row * n_patches + column] = patch.flatten()
-
-  return patches
-
 def get_patches_fast(images):
     from einops import rearrange
     batch_size, channels, height, width = images.shape
@@ -130,13 +113,6 @@ def get_patches_fast(images):
 
     patches = rearrange(images, 'b (h p1) (w p2) c -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
     return patches
-
-def calc_positional_embeddings(sequence_length, d):
-    result = torch.ones(sequence_length, d)
-    for i in range(sequence_length):
-        for j in range(d):
-            result[i][j] = np.sin(i / (10000 ** (j / d))) if j % 2 == 0 else np.cos(i / (10000 ** ((j - 1) / d)))
-    return result
 
 ## This is an encoder head (full attention)
 class Head(nn.Module):
