@@ -26,7 +26,7 @@ n_embd = 256
 # ------------
 
 torch.manual_seed(1337)
-n_head = 8
+n_head = 16
 n_blocks = 4
 dropout = 0.1
 
@@ -37,8 +37,6 @@ image_shape = [64, 64, 3]
 from datasets import load_dataset
 
 ds = load_dataset("EleutherAI/cifarnet")
-
-# data = torch.tensor(ds)
 
 # np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
 trim = 1000000 ## Lets see how little data is needed to still get good performance. 1000 is not enough.
@@ -73,6 +71,13 @@ def get_batch_vit(split):
     y = torch.tensor(data["label"][ix], dtype=torch.long)
     # x, y = x.to(device), y.to(device)
     return x, y
+
+def calc_positional_embeddings(sequence_length, d):
+    result = torch.ones(sequence_length, d)
+    for i in range(sequence_length):
+        for j in range(d):
+            result[i][j] = np.sin(i / (10000 ** (j / d))) if j % 2 == 0 else np.cos(i / (10000 ** ((j - 1) / d)))
+    return result
 
 @torch.no_grad()
 def estimate_loss():
@@ -205,8 +210,8 @@ class VIT(nn.Module):
     #Positional embedding
     # self.pos_embed = nn.Parameter(torch.tensor(positional_embeddings(n_patches ** 2 + 1, embedding_size)))
     # self. pos_embed.requires_grad = False
-    # self.register_buffer('positional_embeddings', calc_positional_embeddings(n_patches ** 2 + 1, n_embd), persistent=False)
-    self.position_embedding_table = nn.Embedding(n_patches ** 2 + 1, n_embd)
+    self.register_buffer('positional_embeddings', calc_positional_embeddings(n_patches ** 2 + 1, n_embd), persistent=False)
+    # self.position_embedding_table = nn.Embedding(n_patches ** 2 + 1, n_embd)
     
     self.class_tokens = nn.Parameter(torch.rand(1, n_embd))
 
@@ -236,9 +241,9 @@ class VIT(nn.Module):
     out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
     
     # Adding positional embedding
-    # out = out + self.positional_embeddings.repeat(n, 1, 1)
-    pos_emb = self.position_embedding_table(torch.arange(n_patches ** 2 + 1, device=device)) # (T,C)
-    out = out + pos_emb
+    out = out + self.positional_embeddings.repeat(n, 1, 1)
+    # pos_emb = self.position_embedding_table(torch.arange(n_patches ** 2 + 1, device=device)) # (T,C)
+    # out = out + pos_emb
     
     # Transformer Blocks
     for block in self.blocks:
