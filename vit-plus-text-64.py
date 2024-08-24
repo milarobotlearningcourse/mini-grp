@@ -22,17 +22,19 @@ learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 16
+n_embd = 64
 # ------------
 
 torch.manual_seed(1337)
-n_head = 4
+n_head = 8
 n_blocks = 4
-dropout = 0.0
+dropout = 0.1
 
 ## Model hyperparameters
-action_bins = 7
+action_bins = 10
 image_shape = [64, 64, 3]
+
+from datasets import load_dataset
 
 from datasets import load_dataset
 dataset = load_dataset("gberseth/mini-oxe-test", split='train[0:500]')
@@ -65,11 +67,16 @@ a_max = dataset_tmp["action"].max(axis=0)
 a_std, a_mean = dataset_tmp["action"].std(axis=0), dataset_tmp["action"].mean(axis=0)
 s_std, s_mean = dataset_tmp["img"].std(axis=0), dataset_tmp["img"].mean(axis=0) 
 a_max = a_max + ((a_max - a_min) / 20.0) ## + a little to avoid using action_bins + 1 for the action = max
-encode_action = lambda af:   (((af - a_mean)/(a_std))).astype(np.float32) # encoder: take a float, output an integer
+spacing = (a_max - a_min)/float(action_bins)
+bins = [a_min + (spacing * i) for i in range(action_bins)]
+encode_action = lambda af:   np.floor((af - a_min)/spacing).astype(np.uint8) # encoder: take a float, output an integer
+decode_action = lambda binN: (binN * spacing) + a_min  # decoder: take a list of integers, output a string
+for i in range(len(dataset_tmp["action"])): ## Convert to classes
+    dataset_tmp["action"][i] = encode_action(dataset_tmp["action"][i])
+dataset_tmp["action"] = dataset_tmp["action"][:,:1] ## Grab just the first dimension for the action
 encode_state = lambda af:   (af/(255.0)).astype(np.float32) # encoder: take a float, output an integer
 resize_state = lambda sf:   cv2.resize(np.array(sf, dtype=np.float32), (image_shape[0], image_shape[1]))  # resize state
 decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
-dataset_tmp["action"] = encode_action(dataset_tmp["action"])
 
 dataset_tmp = {
     "img": torch.tensor(encode_state(dataset_tmp["img"])).to(device),
@@ -80,16 +87,16 @@ dataset_tmp = {
 
 dataset = {"train": dataset_tmp, "test": dataset_tmp} 
 
+
 # data loading
 def get_batch(split):
     # generate a small batch of inputs x and targets y
     data = dataset['train'] if split == 'train' else dataset['test']
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
     x = data["img"][ix]
-    x_goal_img = data["goal_img"][ix]
     y = data["action"][ix]
     goal_e = data["goal"][ix]
-    return x, goal_e, x_goal_img, y
+    return x, goal_e, y
 
 @torch.no_grad()
 def estimate_loss():
@@ -98,8 +105,8 @@ def estimate_loss():
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X, X2, X3, Y = get_batch(split)
-            logits, loss = model(X, X2, X3, Y)
+            X, X2, Y = get_batch(split)
+            logits, loss = model(X, X2, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -115,6 +122,13 @@ def get_patches_fast(images):
     patches = rearrange(images, 'b (h p1) (w p2) c -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
     return patches
 
+def calc_positional_embeddings(sequence_length, d):
+    result = torch.ones(sequence_length, d)
+    for i in range(sequence_length):
+        for j in range(d):
+            result[i][j] = np.sin(i / (10000 ** (j / d))) if j % 2 == 0 else np.cos(i / (10000 ** ((j - 1) / d)))
+    return result
+
 ## This is an encoder head (full attention)
 class Head(nn.Module):
     """ one head of self-attention """
@@ -128,17 +142,12 @@ class Head(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, mask=None):
+    def forward(self, x):
         B,T,C = x.shape
-        if mask == None:
-            mask = torch.ones((T, ), device=device) ## (1, T)
         k = self.key(x)   # (B,T,C)
         q = self.query(x) # (B,T,C)
         # compute attention scores ("affinities")
         wei = q @ k.transpose(-2,-1) * C**-0.5 # (B, T, C) @ (B, C, T) -> (B, T, T)
-        ### Block masked attention
-        wei = wei.masked_fill(mask == 0, float('-inf')) # (B, T, T)
-        ### Decoder attention
         # wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # (B, T, T) ## Remove masking
         wei = F.softmax(wei, dim=-1) # (B, T, T)
         wei = self.dropout(wei)
@@ -156,8 +165,8 @@ class MultiHeadAttention(nn.Module):
         self.proj = nn.Linear(n_embd, n_embd)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, mask=None):
-        out = torch.cat([h(x, mask) for h in self.heads], dim=-1)
+    def forward(self, x):
+        out = torch.cat([h(x) for h in self.heads], dim=-1)
         out = self.dropout(self.proj(out))
         return out
 
@@ -188,23 +197,20 @@ class Block(nn.Module):
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
 
-    def forward(self, x, mask=None):
-        x = x + self.sa(self.ln1(x), mask)
+    def forward(self, x):
+        x = x + self.sa(self.ln1(x))
         x = x + self.ffwd(self.ln2(x))
         return x
 
-class GRP(nn.Module):
+class VIT(nn.Module):
   def __init__(self, mlp_ratio=4):
-    super(GRP, self).__init__()
-
-    self.register_buffer('attention_mask', torch.ones(block_size + (n_patches ** 2) + (n_patches ** 2) + 1 ))
+    super(VIT, self).__init__()
     ## Text processing portion
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-    # self.position_embedding_table_goal = nn.Embedding(block_size, n_embd)
-    #Positional embedding
-    self.position_embedding_table = nn.Embedding(block_size + (n_patches ** 2) + (n_patches ** 2) + 1, n_embd)
-    
+    self.register_buffer('positional_embeddings', calc_positional_embeddings(block_size + n_patches ** 2 + 1, n_embd), persistent=False)
     self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
+
+    #Positional embedding
     
     self.class_tokens = nn.Parameter(torch.rand(1, n_embd))
 
@@ -216,49 +222,33 @@ class GRP(nn.Module):
     # 4) Transformer encoder blocks
     self.blocks = nn.ModuleList([Block(n_embd, n_head) for _ in range(n_blocks)])
 
-    # 5) Regression MLPk
+    # 5) Classification MLPk
     self.mlp = nn.Sequential(
         nn.Linear(n_embd, action_bins),
-        # nn.Softmax(dim=-1)
-        # nn.ReLU(),
-        # nn.Tanh()
-        nn.Sigmoid()
+        nn.Softmax(dim=-1)
     )
 
-  def forward(self, images, goals, goal_img, targets=None):
+  def forward(self, images, goals, targets):
     # Dividing images into patches
     n, c, h, w = images.shape
     B, T = goals.shape
     patches = get_patches_fast(images).to(device)
-    patches_goal_img = get_patches_fast(goal_img).to(device)
     goals_e = self.token_embedding_table(goals)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
     out = self.lin_map(patches)
-    out_goal_img = self.lin_map(patches_goal_img)
     
     # Adding classification token to the tokens
     out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
-    out = torch.cat([goals_e, out_goal_img, out], dim=1) ## Add text and goal image encoding to begining of encoding.
+    out = torch.cat([goals_e, out], dim=1) ## Add text and goal image encoding to begining of encoding.
     
     # Adding positional embedding
-    # out = out + self.positional_embeddings.repeat(n, 1, 1)
-    # pos_emb_goal_txt = self.position_embedding_table(torch.arange(n, device=device)) # (T,C)
-    pos_emb = self.position_embedding_table(torch.arange(T + c + c + 1, device=device)) # (T,C)
-    out = out + pos_emb
-
-    ## Compute blocked masks
-    mask = torch.ones((T + c + c + 1, ), device=device) ## (1, T)
-    # if targets is None:
-    #     pass
-    # elif (torch.rand(1)[0] > 0.66):  
-    #     mask[0:T] = torch.zeros((1,T), device=device) ## Mask goal string
-    # elif (torch.rand(1)[0] > 0.33):
-    #     mask[block_size:block_size+c] = torch.zeros((1,c), device=device) ## Mask goal image
-    # # Transformer Blocks
+    out = out + self.positional_embeddings.repeat(n, 1, 1)
+    
+    # Transformer Blocks
     for block in self.blocks:
-        out = block(out, mask)
+        out = block(out)
 
     # Getting the classification token only
     out = out[:, 0]
@@ -267,15 +257,16 @@ class GRP(nn.Module):
     if targets is None:
         loss = None
     else:
+        # B,T,C = 4,8,2 # batch, time, channels
         B, C = logits.shape
-        loss = F.mse_loss(logits, targets)
+        # logits = logits.view(B*T, C)
+        targets = targets.view(B)
+        loss = F.cross_entropy(logits, targets)
     return (logits, loss)
 
 if __name__ == "__main__":
     import wandb
     # start a new wandb run to track this script
-    model = GRP()
-    m = model.to(device)
     # wandb.init(
     #     # set the wandb project where this run will be logged
     #     project="mini-grp",
@@ -289,60 +280,32 @@ if __name__ == "__main__":
     #     }
     # )
     # wandb.run.log_code(".")
+    model = VIT()
+    m = model.to(device)
     # print the number of parameters in the model
     print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
     # create a PyTorch optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-    import simpler_env
-    from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
-    task_name = "widowx_carrot_on_plate"  # @param ["google_robot_pick_coke_can", "google_robot_move_near", "google_robot_open_drawer", "google_robot_close_drawer", "widowx_spoon_on_towel", "widowx_carrot_on_plate", "widowx_stack_cube", "widowx_put_eggplant_in_basket"]
-    if 'env' in locals():
-        print("Closing existing env")
-        env.close()
-        del env
-    env = simpler_env.make(task_name)
+
     for iter in range(max_iters):
 
         # every once in a while evaluate the loss on train and val sets
         if iter % eval_interval == 0 or iter == max_iters - 1:
             losses = estimate_loss()
-            obs, reset_info = env.reset()
-            instruction = env.get_language_instruction()
-            print("Reset info", reset_info)
-            print("Instruction", instruction)
-            frames, rewards = [], []
-            done, truncated = False, False
-            while not (done or truncated):
-                # action[:3]: delta xyz; action[3:6]: delta rotation in axis-angle representation;
-                # action[6:7]: gripper (the meaning of open / close depends on robot URDF)
-                image = get_image_from_maniskill2_obs_dict(env, obs)
-                action, loss = model.forward(torch.tensor(np.array([encode_state(resize_state(image))])).to(device), 
-                                       torch.tensor(np.array([encode_txt(instruction)])).to(device),
-                                       torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
-                                       )
-                # action = env.action_space.sample() # replace this with your policy inference
-                obs, reward, done, truncated, info = env.step(decode_action(action.cpu().detach().numpy()[0]))
-                frames.append(image)
-                rewards.append(reward)
-            
-            episode_stats = info.get('episode_stats', {})
-            print("Episode stats", episode_stats)
-            print(f"step {iter}: train loss {losses['train']:.8f}, val loss {losses['val']:.8f}, avg reward {np.mean(rewards):.8f}")
-            # wandb.log({"train loss": losses['train'], "val loss": losses['val'], "avg reward": np.mean(rewards)})
-            import moviepy.editor as mpy
-            clip = mpy.ImageSequenceClip(list(frames), fps=20)
-            clip.write_videofile("./data/sim-env-"+str(0)+".mp4", fps=20)
-            # wandb.log({"example": wandb.Video("./data/sim-env-"+str(0)+".mp4")})
+            print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+            # wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
         # sample a batch of data
-        xb, x2b, x3b, yb = get_batch('train')
+        xb, x2b, yb = get_batch('train')
 
         # evaluate the loss
-        logits, loss = model(xb, x2b, x3b, yb)
+        logits, loss = model(xb, x2b, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
 
-    
+    # generate from the model
+    # context = torch.zeros((1, 1), dtype=torch.long, device=device)
+    # print(decode(m.generate(context, max_new_tokens=2000)[0].tolist()))
     # wandb.finish()

@@ -52,17 +52,6 @@ dataset["test"]=  {
 
 
 # data loading
-def get_batch_oxe(split):
-    # generate a small batch of inputs x and targets y
-    data = train_set if split == 'train' else val_set
-    ix = torch.randint(len(data), (batch_size,))
-    # print ( data[ix])
-    x = torch.stack([data[i][0] for i in ix])
-    y = torch.stack([data[i][1] for i in ix])
-    x, y = x.to(device), y.to(device)
-    return x, y
-
-# data loading
 def get_batch_vit(split):
     # generate a small batch of inputs x and targets y
     data = dataset['train'] if split == 'train' else dataset['test']
@@ -92,23 +81,6 @@ def estimate_loss():
         out[split] = losses.mean()
     model.train()
     return out
-
-def get_patches(images):
-  batch_size, channels, height, width = images.shape
-
-  assert height == width, "square images only"
-
-  patches = torch.zeros(batch_size, n_patches ** 2, height * width * channels // n_patches ** 2)
-  patch_size = height // n_patches
-
-  for idx, image in enumerate(images):
-      for row in range(n_patches):
-          for column in range(n_patches):
-            ## Channel first
-            patch = image[:, row * patch_size: (row + 1) * patch_size, column * patch_size: (column + 1) * patch_size]
-            patches[idx, row * n_patches + column] = patch.flatten()
-
-  return patches
 
 def get_patches_fast(images):
     from einops import rearrange

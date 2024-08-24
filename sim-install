@@ -1,5 +1,6 @@
 #!/bin/bash
 
+sudo apt-get install vulkan-
 pip install orbax-checkpoint==0.4.4
 git clone https://github.com/simpler-env/ManiSkill2_real2sim.git
 pip install -e ./ManiSkill2_real2sim

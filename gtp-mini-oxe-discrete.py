@@ -41,7 +41,6 @@ dataset_tmp = {
     "action": np.concatenate((np.array(dataset["action"]), 
                               np.array(dataset["rotation_delta"]), 
                               np.array(dataset["open_gripper"])), axis=1),
-    "goal_img": np.array(dataset["goal_img"]),
     "goal": dataset["goal"]
 }
 shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
@@ -74,7 +73,6 @@ dataset_tmp["action"] = encode_action(dataset_tmp["action"])
 dataset_tmp = {
     "img": torch.tensor(encode_state(dataset_tmp["img"])).to(device),
     "action": torch.tensor(dataset_tmp["action"]).to(device),            
-    "goal_img": torch.tensor(encode_state(dataset_tmp["goal_img"])).to(device),
     "goal": torch.tensor([encode_txt(goal[:shortest_goal_txt]) for goal in dataset_tmp["goal"]]).to(device)
 }
 
@@ -86,10 +84,9 @@ def get_batch(split):
     data = dataset['train'] if split == 'train' else dataset['test']
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
     x = data["img"][ix]
-    x_goal_img = data["goal_img"][ix]
     y = data["action"][ix]
     goal_e = data["goal"][ix]
-    return x, goal_e, x_goal_img, y
+    return x, goal_e, y
 
 @torch.no_grad()
 def estimate_loss():
@@ -98,8 +95,8 @@ def estimate_loss():
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X, X2, X3, Y = get_batch(split)
-            logits, loss = model(X, X2, X3, Y)
+            X, X2, Y = get_batch(split)
+            logits, loss = model(X, X2, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -114,6 +111,13 @@ def get_patches_fast(images):
 
     patches = rearrange(images, 'b (h p1) (w p2) c -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
     return patches
+
+def calc_positional_embeddings(sequence_length, d):
+    result = torch.ones(sequence_length, d)
+    for i in range(sequence_length):
+        for j in range(d):
+            result[i][j] = np.sin(i / (10000 ** (j / d))) if j % 2 == 0 else np.cos(i / (10000 ** ((j - 1) / d)))
+    return result
 
 ## This is an encoder head (full attention)
 class Head(nn.Module):
@@ -197,12 +201,13 @@ class GRP(nn.Module):
   def __init__(self, mlp_ratio=4):
     super(GRP, self).__init__()
 
-    self.register_buffer('attention_mask', torch.ones(block_size + (n_patches ** 2) + (n_patches ** 2) + 1 ))
+    self.register_buffer('attention_mask', torch.ones(block_size + (n_patches ** 2) + 1 ))
     ## Text processing portion
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
     # self.position_embedding_table_goal = nn.Embedding(block_size, n_embd)
     #Positional embedding
-    self.position_embedding_table = nn.Embedding(block_size + (n_patches ** 2) + (n_patches ** 2) + 1, n_embd)
+    # self.position_embedding_table = nn.Embedding(block_size + (n_patches ** 2) + 1, n_embd)
+    self.register_buffer('positional_embeddings', calc_positional_embeddings( block_size + (n_patches ** 2) + 1, n_embd), persistent=False)
     
     self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
     
@@ -294,45 +299,14 @@ if __name__ == "__main__":
 
     # create a PyTorch optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-    import simpler_env
-    from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
-    task_name = "widowx_carrot_on_plate"  # @param ["google_robot_pick_coke_can", "google_robot_move_near", "google_robot_open_drawer", "google_robot_close_drawer", "widowx_spoon_on_towel", "widowx_carrot_on_plate", "widowx_stack_cube", "widowx_put_eggplant_in_basket"]
-    if 'env' in locals():
-        print("Closing existing env")
-        env.close()
-        del env
-    env = simpler_env.make(task_name)
     for iter in range(max_iters):
 
         # every once in a while evaluate the loss on train and val sets
         if iter % eval_interval == 0 or iter == max_iters - 1:
             losses = estimate_loss()
-            obs, reset_info = env.reset()
-            instruction = env.get_language_instruction()
-            print("Reset info", reset_info)
-            print("Instruction", instruction)
-            frames, rewards = [], []
-            done, truncated = False, False
-            while not (done or truncated):
-                # action[:3]: delta xyz; action[3:6]: delta rotation in axis-angle representation;
-                # action[6:7]: gripper (the meaning of open / close depends on robot URDF)
-                image = get_image_from_maniskill2_obs_dict(env, obs)
-                action, loss = model.forward(torch.tensor(np.array([encode_state(resize_state(image))])).to(device), 
-                                       torch.tensor(np.array([encode_txt(instruction)])).to(device),
-                                       torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
-                                       )
-                # action = env.action_space.sample() # replace this with your policy inference
-                obs, reward, done, truncated, info = env.step(decode_action(action.cpu().detach().numpy()[0]))
-                frames.append(image)
-                rewards.append(reward)
             
-            episode_stats = info.get('episode_stats', {})
-            print("Episode stats", episode_stats)
-            print(f"step {iter}: train loss {losses['train']:.8f}, val loss {losses['val']:.8f}, avg reward {np.mean(rewards):.8f}")
+            print(f"step {iter}: train loss {losses['train']:.8f}, val loss {losses['val']:.8f}")
             # wandb.log({"train loss": losses['train'], "val loss": losses['val'], "avg reward": np.mean(rewards)})
-            import moviepy.editor as mpy
-            clip = mpy.ImageSequenceClip(list(frames), fps=20)
-            clip.write_videofile("./data/sim-env-"+str(0)+".mp4", fps=20)
             # wandb.log({"example": wandb.Video("./data/sim-env-"+str(0)+".mp4")})
 
         # sample a batch of data
