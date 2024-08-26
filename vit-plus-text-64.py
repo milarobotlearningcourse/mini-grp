@@ -12,12 +12,12 @@ from tqdm import tqdm, trange
 import cv2
 
 # hyperparameters
-batch_size = 64 # how many independent sequences will we process in parallel?
+batch_size = 38 # how many independent sequences will we process in parallel?
 block_size = 32 # what is the maximum context length for predictions?
 vocab_size = n_patches = 8
-max_iters = 5000
+max_iters = 10000
 eval_interval = 100
-learning_rate = 3e-4
+learning_rate = 1e-4
 # device = 'cpu'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
@@ -28,7 +28,7 @@ n_embd = 64
 torch.manual_seed(1337)
 n_head = 8
 n_blocks = 4
-dropout = 0.1
+dropout = 0.0
 
 ## Model hyperparameters
 action_bins = 10
@@ -37,7 +37,7 @@ image_shape = [64, 64, 3]
 from datasets import load_dataset
 
 from datasets import load_dataset
-dataset = load_dataset("gberseth/mini-oxe-test", split='train[0:500]')
+dataset = load_dataset("gberseth/mini-oxe-test", split='train[0:38]')
 dataset_tmp = {
     "img": np.array(dataset["img"]),
     "action": np.concatenate((np.array(dataset["action"]), 
@@ -46,7 +46,7 @@ dataset_tmp = {
     "goal_img": np.array(dataset["goal_img"]),
     "goal": dataset["goal"]
 }
-shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
+block_size = shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
 
 print("Dataset shape:", len(dataset_tmp["img"]))
 
@@ -80,7 +80,7 @@ decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
 
 dataset_tmp = {
     "img": torch.tensor(encode_state(dataset_tmp["img"])).to(device),
-    "action": torch.tensor(dataset_tmp["action"]).to(device),            
+    "action": torch.tensor(dataset_tmp["action"], dtype=torch.long).to(device),            
     "goal_img": torch.tensor(encode_state(dataset_tmp["goal_img"])).to(device),
     "goal": torch.tensor([encode_txt(goal[:shortest_goal_txt]) for goal in dataset_tmp["goal"]]).to(device)
 }
@@ -207,7 +207,7 @@ class VIT(nn.Module):
     super(VIT, self).__init__()
     ## Text processing portion
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-    self.register_buffer('positional_embeddings', calc_positional_embeddings(block_size + n_patches ** 2 + 1, n_embd), persistent=False)
+    self.register_buffer('positional_embeddings', calc_positional_embeddings(block_size + (n_patches ** 2) + 1, n_embd), persistent=False)
     self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
 
     #Positional embedding

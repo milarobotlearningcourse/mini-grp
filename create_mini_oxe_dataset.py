@@ -32,7 +32,7 @@ dropout = 0.1
 
 ## Model hyperparameters
 image_shape = [64, 64, 3]
-num_episodes = 20 ## How many episodes to grab from the dataset for training
+num_episodes = 1 ## How many episodes to grab from the dataset for training
 
 from datasets import load_dataset
 
