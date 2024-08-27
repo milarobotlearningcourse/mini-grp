@@ -37,7 +37,7 @@ image_shape = [64, 64, 3]
 from datasets import load_dataset
 
 from datasets import load_dataset
-dataset = load_dataset("gberseth/mini-oxe", split='train')
+dataset = load_dataset("gberseth/mini-oxe", split='train[:38]')
 dataset_tmp = {
     "img": np.array(dataset["img"]),
     "action": np.concatenate((np.array(dataset["action"]), 
@@ -66,7 +66,7 @@ print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 ## Get the actions and encode them to map to [-1, 1]
 a_min = dataset_tmp["action"].min(axis=0) - 0.001 ## Get the min and max bound for the actions to use for bining 
 a_max = dataset_tmp["action"].max(axis=0) 
-a_std, a_mean = dataset_tmp["action"].std(axis=0), dataset_tmp["action"].mean(axis=0)
+a_std, a_mean = dataset_tmp["action"].std(axis=0) + 0.001, dataset_tmp["action"].mean(axis=0)
 action_bins = len(a_mean)
 s_std, s_mean = dataset_tmp["img"].std(axis=0), dataset_tmp["img"].mean(axis=0) 
 a_max = a_max + ((a_max - a_min) / 20.0) ## + a little to avoid using action_bins + 1 for the action = max
