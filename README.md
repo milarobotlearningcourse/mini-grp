@@ -9,7 +9,13 @@ Minimialist reimplimentation of the Octo Generalist Robotics Policy.
 
 conda create -n roble python=3.10
 conda activate roble
-conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia 
+
+pip install torch==2.4.0
+
+### Install MilaTools
+
+pip install milatools decorator==4.4.2 moviepy==1.0.3
 
 ## Dataset
 
