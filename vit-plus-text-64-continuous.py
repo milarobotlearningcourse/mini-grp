@@ -37,7 +37,7 @@ image_shape = [64, 64, 3]
 from datasets import load_dataset
 
 from datasets import load_dataset
-dataset = load_dataset("gberseth/mini-oxe", split='train[:38]')
+dataset = load_dataset("datasets/mini-bridge.hf", split='train')
 dataset_tmp = {
     "img": np.array(dataset["img"]),
     "action": np.concatenate((np.array(dataset["action"]), 
