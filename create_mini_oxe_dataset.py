@@ -1,4 +1,4 @@
-
+## Code to fetch data and create an easy dataset.
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -32,7 +32,7 @@ dropout = 0.1
 
 ## Model hyperparameters
 image_shape = [64, 64, 3]
-num_episodes = 1 ## How many episodes to grab from the dataset for training
+num_episodes = 100 ## How many episodes to grab from the dataset for training
 
 from datasets import load_dataset
 
@@ -83,4 +83,4 @@ dataset = {"train": dataset_tmp}
 from datasets import Dataset
 ds = Dataset.from_dict(dataset_tmp)
 print("Dataset: ", ds)
-ds.push_to_hub("gberseth/mini-oxe-test")
+ds.push_to_hub("gberseth/mini-oxe")
