@@ -12,7 +12,7 @@ from tqdm import tqdm, trange
 import cv2
 
 # hyperparameters
-batch_size = 64 # how many independent sequences will we process in parallel?
+batch_size = 38 # how many independent sequences will we process in parallel?
 block_size = 32 # what is the maximum context length for predictions?
 vocab_size = n_patches = 8
 max_iters = 10000
@@ -22,13 +22,13 @@ learning_rate = 1e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 256
+n_embd = 64
 # ------------
 
 torch.manual_seed(1337)
-n_head = 16
+n_head = 8
 n_blocks = 4
-dropout = 0.1
+dropout = 0.0
 
 ## Model hyperparameters
 action_bins = 10
@@ -36,37 +36,68 @@ image_shape = [64, 64, 3]
 
 from datasets import load_dataset
 
-ds = load_dataset("EleutherAI/cifarnet")
+from datasets import load_dataset
+dataset = load_dataset("gberseth/mini-oxe", split='train')
+dataset_tmp = {
+    "img": np.array(dataset["img"]),
+    "action": np.concatenate((np.array(dataset["action"]), 
+                              np.array(dataset["rotation_delta"]), 
+                              np.array(dataset["open_gripper"])), axis=1),
+    "goal_img": np.array(dataset["goal_img"]),
+    "goal": dataset["goal"]
+}
+block_size = shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
 
-# np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
-trim = 1000000 ## Lets see how little data is needed to still get good performance. 1000 is not enough.
-dataset = {}
-dataset["train"]= {
-           "img": torch.tensor(np.array(ds["train"]["img"][:trim], dtype=np.uint8)).to(device),
-           "label": torch.tensor(np.array(ds["train"]["label"][:trim], dtype=np.uint8)).to(device) 
-          }         
-dataset["test"]=  {
-           "img": torch.tensor(np.array(ds["test"]["img"][:trim], dtype=np.uint8)).to(device),
-           "label": torch.tensor(np.array(ds["test"]["label"][:trim], dtype=np.uint8)).to(device)
-         }
+print("Dataset shape:", len(dataset_tmp["img"]))
+
+# here are all the unique characters that occur in this text
+chars = sorted(list(set([item for row in dataset_tmp["goal"] for item in row]))) ## Flatten to a long string
+vocab_size = len(chars)
+# create a mapping from characters to integers
+stoi = { ch:i for i,ch in enumerate(chars) }
+itos = { i:ch for i,ch in enumerate(chars) }
+encode_txt = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list of integers
+decode_txy = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
+print("vocab_size:", vocab_size)
+print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
+
+
+
+## Get the actions and encode them to map to [-1, 1]
+a_min = dataset_tmp["action"].min(axis=0) - 0.001 ## Get the min and max bound for the actions to use for bining 
+a_max = dataset_tmp["action"].max(axis=0) 
+a_std, a_mean = dataset_tmp["action"].std(axis=0), dataset_tmp["action"].mean(axis=0)
+action_bins = len(a_mean)
+s_std, s_mean = dataset_tmp["img"].std(axis=0), dataset_tmp["img"].mean(axis=0) 
+a_max = a_max + ((a_max - a_min) / 20.0) ## + a little to avoid using action_bins + 1 for the action = max
+encode_action = lambda af:   (((af - a_mean)/(a_std))).astype(np.float32) # encoder: take a float, output an integer
+encode_state = lambda af:   (af/(255.0)).astype(np.float32) # encoder: take a float, output an integer
+resize_state = lambda sf:   cv2.resize(np.array(sf, dtype=np.float32), (image_shape[0], image_shape[1]))  # resize state
+decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
+# for i in range(len(dataset_tmp["action"])): ## Convert to classes
+dataset_tmp["action"] = encode_action(dataset_tmp["action"])
+dataset_tmp["img"] = encode_state(dataset_tmp["img"])
+dataset_tmp["goal_img"] = encode_state(dataset_tmp["goal_img"])
+
+dataset_tmp = {
+    "img": torch.tensor(encode_state(dataset_tmp["img"])).to(device),
+    "action": torch.tensor(dataset_tmp["action"], dtype=torch.float).to(device),            
+    "goal_img": torch.tensor(encode_state(dataset_tmp["goal_img"])).to(device),
+    "goal": torch.tensor([encode_txt(goal[:shortest_goal_txt]) for goal in dataset_tmp["goal"]]).to(device)
+}
+
+dataset = {"train": dataset_tmp, "test": dataset_tmp} 
 
 
 # data loading
-def get_batch_vit(split):
+def get_batch(split):
     # generate a small batch of inputs x and targets y
     data = dataset['train'] if split == 'train' else dataset['test']
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
-    x = torch.tensor(data["img"][ix], dtype=torch.float)
-    y = torch.tensor(data["label"][ix], dtype=torch.long)
-    # x, y = x.to(device), y.to(device)
-    return x, y
-
-def calc_positional_embeddings(sequence_length, d):
-    result = torch.ones(sequence_length, d)
-    for i in range(sequence_length):
-        for j in range(d):
-            result[i][j] = np.sin(i / (10000 ** (j / d))) if j % 2 == 0 else np.cos(i / (10000 ** ((j - 1) / d)))
-    return result
+    x = data["img"][ix]
+    y = data["action"][ix]
+    goal_e = data["goal"][ix]
+    return x, goal_e, y
 
 @torch.no_grad()
 def estimate_loss():
@@ -75,8 +106,8 @@ def estimate_loss():
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X, Y = get_batch_vit(split)
-            logits, loss = model(X, Y)
+            X, X2, Y = get_batch(split)
+            logits, loss = model(X, X2, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -172,24 +203,22 @@ class Block(nn.Module):
         x = x + self.ffwd(self.ln2(x))
         return x
 
-class VIT(nn.Module):
+class GRP(nn.Module):
   def __init__(self, mlp_ratio=4):
-    super(VIT, self).__init__()
-    # assert shape[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
-    # assert shape[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
+    super(GRP, self).__init__()
+    ## Text processing portion
+    self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+    self.register_buffer('positional_embeddings', calc_positional_embeddings(block_size + (n_patches ** 2) + 1, n_embd), persistent=False)
     self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
 
     #Positional embedding
-    # self.pos_embed = nn.Parameter(torch.tensor(positional_embeddings(n_patches ** 2 + 1, embedding_size)))
-    # self. pos_embed.requires_grad = False
-    self.register_buffer('positional_embeddings', calc_positional_embeddings(n_patches ** 2 + 1, n_embd), persistent=False)
-    # self.position_embedding_table = nn.Embedding(n_patches ** 2 + 1, n_embd)
     
     self.class_tokens = nn.Parameter(torch.rand(1, n_embd))
 
     self.input_d = int(image_shape[2] * self.patch_size[0] * self.patch_size[1])
 
     self.lin_map = nn.Linear(self.input_d, n_embd, bias=False) 
+    self.lin_map_goal_img = nn.Linear(self.input_d, n_embd, bias=False) 
 
     # 4) Transformer encoder blocks
     self.blocks = nn.ModuleList([Block(n_embd, n_head) for _ in range(n_blocks)])
@@ -200,10 +229,12 @@ class VIT(nn.Module):
         nn.Softmax(dim=-1)
     )
 
-  def forward(self, images, targets=None):
+  def forward(self, images, goals, targets):
     # Dividing images into patches
     n, c, h, w = images.shape
+    B, T = goals.shape
     patches = get_patches_fast(images).to(device)
+    goals_e = self.token_embedding_table(goals)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
@@ -211,11 +242,10 @@ class VIT(nn.Module):
     
     # Adding classification token to the tokens
     out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
+    out = torch.cat([goals_e, out], dim=1) ## Add text and goal image encoding to begining of encoding.
     
     # Adding positional embedding
     out = out + self.positional_embeddings.repeat(n, 1, 1)
-    # pos_emb = self.position_embedding_table(torch.arange(n_patches ** 2 + 1, device=device)) # (T,C)
-    # out = out + pos_emb
     
     # Transformer Blocks
     for block in self.blocks:
@@ -223,35 +253,31 @@ class VIT(nn.Module):
 
     # Getting the classification token only
     out = out[:, 0]
-    logits = self.mlp(out)
+    out = self.mlp(out)
         
     if targets is None:
         loss = None
     else:
-        # B,T,C = 4,8,2 # batch, time, channels
-        B, C = logits.shape
-        # logits = logits.view(B*T, C)
-        targets = targets.view(B)
-        loss = F.cross_entropy(logits, targets)
-    return (logits, loss)
+        loss = F.mse_loss(out, targets) ## B, C
+    return (out, loss)
 
 if __name__ == "__main__":
     import wandb
     # start a new wandb run to track this script
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project="mini-vit",
+    # wandb.init(
+    #     # set the wandb project where this run will be logged
+    #     project="mini-grp",
 
-        # track hyperparameters and run metadata
-        config={
-        "learning_rate": 0.02,
-        "architecture": "VIT",
-        "dataset": "EleutherAI/cifarnet",
-        "epochs": max_iters,
-        }
-    )
-    wandb.run.log_code(".")
-    model = VIT()
+    #     # track hyperparameters and run metadata
+    #     config={
+    #     "learning_rate": learning_rate,
+    #     "architecture": "VIT",
+    #     "dataset": "EleutherAI/cifarnet",
+    #     "epochs": max_iters,
+    #     }
+    # )
+    # wandb.run.log_code(".")
+    model = GRP()
     m = model.to(device)
     # print the number of parameters in the model
     print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
@@ -265,18 +291,18 @@ if __name__ == "__main__":
         if iter % eval_interval == 0 or iter == max_iters - 1:
             losses = estimate_loss()
             print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-            wandb.log({"train loss": losses['train'], "val loss": losses['val']})
+            # wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
         # sample a batch of data
-        xb, yb = get_batch_vit('train')
+        xb, x2b, yb = get_batch('train')
 
         # evaluate the loss
-        logits, loss = model(xb, yb)
+        logits, loss = model(xb, x2b, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
 
     # generate from the model
-    context = torch.zeros((1, 1), dtype=torch.long, device=device)
+    # context = torch.zeros((1, 1), dtype=torch.long, device=device)
     # print(decode(m.generate(context, max_new_tokens=2000)[0].tolist()))
-    wandb.finish()
+    # wandb.finish()

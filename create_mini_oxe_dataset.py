@@ -83,4 +83,5 @@ dataset = {"train": dataset_tmp}
 from datasets import Dataset
 ds = Dataset.from_dict(dataset_tmp)
 print("Dataset: ", ds)
+ds.save_to_disk("datasets/mini-bridge.hf")
 ds.push_to_hub("gberseth/mini-oxe")

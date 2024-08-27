@@ -17,7 +17,7 @@ block_size = 32 # what is the maximum context length for predictions?
 vocab_size = n_patches = 8
 max_iters = 5000
 eval_interval = 100
-learning_rate = 3e-4
+learning_rate = 1e-4
 # device = 'cpu'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")

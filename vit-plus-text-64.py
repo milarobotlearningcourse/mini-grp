@@ -61,6 +61,10 @@ decode_txy = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of i
 print("vocab_size:", vocab_size)
 print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 
+
+hist, bin_edges = np.histogram(dataset_tmp["action"], density=True, bins=action_bins)
+print("action histogram:", hist)
+print("bin edges: ", bin_edges)
 ## Get the actions and encode them to map to [-1, 1]
 a_min = dataset_tmp["action"].min(axis=0) - 0.001 ## Get the min and max bound for the actions to use for bining 
 a_max = dataset_tmp["action"].max(axis=0) 
