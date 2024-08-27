@@ -202,9 +202,9 @@ class Block(nn.Module):
         x = x + self.ffwd(self.ln2(x))
         return x
 
-class VIT(nn.Module):
+class GRP(nn.Module):
   def __init__(self, mlp_ratio=4):
-    super(VIT, self).__init__()
+    super(GRP, self).__init__()
     ## Text processing portion
     self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
     self.register_buffer('positional_embeddings', calc_positional_embeddings(block_size + (n_patches ** 2) + 1, n_embd), persistent=False)
@@ -280,7 +280,7 @@ if __name__ == "__main__":
     #     }
     # )
     # wandb.run.log_code(".")
-    model = VIT()
+    model = GRP()
     m = model.to(device)
     # print the number of parameters in the model
     print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
