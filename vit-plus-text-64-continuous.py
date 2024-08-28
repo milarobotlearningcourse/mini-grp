@@ -12,7 +12,7 @@ from tqdm import tqdm, trange
 import cv2
 
 # hyperparameters
-batch_size = 38 # how many independent sequences will we process in parallel?
+batch_size = 64 # how many independent sequences will we process in parallel?
 block_size = 32 # what is the maximum context length for predictions?
 vocab_size = n_patches = 8
 max_iters = 10000
@@ -28,18 +28,18 @@ n_embd = 64
 torch.manual_seed(1337)
 n_head = 8
 n_blocks = 4
-dropout = 0.0
+dropout = 0.1
 
 ## Model hyperparameters
 action_bins = 10
 image_shape = [64, 64, 3]
+name = 'mini-bridge-mini'
 
-from datasets import load_dataset
-
-from datasets import load_dataset
-dataset = load_dataset("datasets/mini-bridge.hf", split='train')
+from datasets import load_dataset, load_from_disk
+dataset = load_dataset("gberseth/" + name, split='train')
+## dataset = load_from_disk("datasets/mini-bridge.hf")
 dataset_tmp = {
-    "img": np.array(dataset["img"]),
+    "img": np.array(dataset["img"]), ## This cast seems to take a long time...
     "action": np.concatenate((np.array(dataset["action"]), 
                               np.array(dataset["rotation_delta"]), 
                               np.array(dataset["open_gripper"])), axis=1),
@@ -49,7 +49,7 @@ dataset_tmp = {
 block_size = shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
 
 print("Dataset shape:", len(dataset_tmp["img"]))
-
+batch_size = min(64, len(dataset_tmp["img"]))
 # here are all the unique characters that occur in this text
 chars = sorted(list(set([item for row in dataset_tmp["goal"] for item in row]))) ## Flatten to a long string
 vocab_size = len(chars)
@@ -66,7 +66,7 @@ print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 ## Get the actions and encode them to map to [-1, 1]
 a_min = dataset_tmp["action"].min(axis=0) - 0.001 ## Get the min and max bound for the actions to use for bining 
 a_max = dataset_tmp["action"].max(axis=0) 
-a_std, a_mean = dataset_tmp["action"].std(axis=0) + 0.001, dataset_tmp["action"].mean(axis=0)
+a_std, a_mean = (dataset_tmp["action"].std(axis=0) + 0.001) * 2.0, dataset_tmp["action"].mean(axis=0)
 action_bins = len(a_mean)
 s_std, s_mean = dataset_tmp["img"].std(axis=0), dataset_tmp["img"].mean(axis=0) 
 a_max = a_max + ((a_max - a_min) / 20.0) ## + a little to avoid using action_bins + 1 for the action = max
@@ -225,8 +225,8 @@ class GRP(nn.Module):
 
     # 5) Classification MLPk
     self.mlp = nn.Sequential(
+        # nn.LayerNorm(n_embd),
         nn.Linear(n_embd, action_bins),
-        nn.Softmax(dim=-1)
     )
 
   def forward(self, images, goals, targets):
@@ -241,8 +241,8 @@ class GRP(nn.Module):
     out = self.lin_map(patches)
     
     # Adding classification token to the tokens
-    out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
-    out = torch.cat([goals_e, out], dim=1) ## Add text and goal image encoding to begining of encoding.
+    out = torch.cat((self.class_tokens.expand(n, 1, -1), goals_e, out), dim=1)
+    # out = torch.cat([out, goals_e], dim=1) ## Add text and goal image encoding to begining of encoding.
     
     # Adding positional embedding
     out = out + self.positional_embeddings.repeat(n, 1, 1)
@@ -258,6 +258,9 @@ class GRP(nn.Module):
     if targets is None:
         loss = None
     else:
+        B, C = targets.shape
+        # targets = targets.view(B)
+        out = out.view(B, C)
         loss = F.mse_loss(out, targets) ## B, C
     return (out, loss)
 
@@ -290,6 +293,7 @@ if __name__ == "__main__":
         # every once in a while evaluate the loss on train and val sets
         if iter % eval_interval == 0 or iter == max_iters - 1:
             losses = estimate_loss()
+            ## Really want the loss to start out 0.2 or less.
             print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
             # wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 

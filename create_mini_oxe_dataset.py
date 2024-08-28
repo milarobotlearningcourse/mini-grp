@@ -1,38 +1,14 @@
 ## Code to fetch data and create an easy dataset.
-import torch
-import torch.nn as nn
-from torch.nn import functional as F
-from torch.optim import Adam
-from torch.nn import CrossEntropyLoss
-from torch.utils.data import DataLoader
-
 import tensorflow_datasets as tfds
 import numpy as np
 from tqdm import tqdm, trange
 import cv2
 
-# hyperparameters
-batch_size = 64 # how many independent sequences will we process in parallel?
-block_size = 32 # what is the maximum context length for predictions?
-vocab_size = n_patches = 8
-max_iters = 5000
-eval_interval = 100
-learning_rate = 3e-4
-# device = 'cpu'
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
-eval_iters = 20
-n_embd = 64
-# ------------
-
-torch.manual_seed(1337)
-n_head = 8
-n_blocks = 4
-dropout = 0.1
 
 ## Model hyperparameters
 image_shape = [64, 64, 3]
-num_episodes = 1000 ## How many episodes to grab from the dataset for training
+num_episodes = 1 ## How many episodes to grab from the dataset for training
+name = 'mini-bridge-test'
 
 from datasets import load_dataset
 
@@ -44,7 +20,6 @@ builder = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bridg
 datasetRemote = builder.as_dataset(split='train[:' + str(num_episodes) + ']')
 dataset_tmp = {"img": [], "action": [], "goal": [], "goal_img": [],
                 "rotation_delta": [], "open_gripper": [] }
-shortest_goal_txt = 10000000000
 for episode in datasetRemote:
     episode_ = {'steps': [] }
     episode = list(episode['steps'])
@@ -59,7 +34,6 @@ for episode in datasetRemote:
         dataset_tmp["open_gripper"].append(np.array(episode[i]['action']['open_gripper']))
         dataset_tmp["goal"].append(goal)
         dataset_tmp["goal_img"].append(goal_img)
-        if len(goal) < shortest_goal_txt: shortest_goal_txt = len(goal)
 
 # here are all the unique characters that occur in this text
 chars = sorted(list(set([item for row in dataset_tmp["goal"] for item in row]))) ## Flatten to a long string
@@ -81,7 +55,22 @@ dataset_tmp["goal_img"] = np.array(dataset_tmp["goal_img"], dtype=np.uint8)
 dataset = {"train": dataset_tmp} 
 
 from datasets import Dataset
+from datasets import ClassLabel, Value, Image, Features
+features = Features({
+    'goal': Value('string'),
+    'img': Image(),
+    'goal_img': Image(),
+    'rotation_delta': Value('float'),
+    'open_gripper': Value('string'),
+    'action': Value('string'),
+    ## Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None)
+
+})
 ds = Dataset.from_dict(dataset_tmp)
+# ds = ds.train_test_split(test_size=0.1)
 print("Dataset: ", ds)
-ds.save_to_disk("datasets/mini-bridge.hf")
-ds.push_to_hub("gberseth/mini-oxe")
+new_features = ds.features.copy()
+new_features["img"] = Image()
+ds.cast(new_features)
+ds.save_to_disk("datasets/" + name + ".hf")
+ds.push_to_hub("gberseth/" + name)
