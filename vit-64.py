@@ -38,6 +38,7 @@ from datasets import load_dataset
 
 ds = load_dataset("EleutherAI/cifarnet")
 
+print('Features:', ds["train"].features)
 # np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
 trim = 1000000 ## Lets see how little data is needed to still get good performance. 1000 is not enough.
 dataset = {}

@@ -3,6 +3,7 @@ import tensorflow_datasets as tfds
 import numpy as np
 from tqdm import tqdm, trange
 import cv2
+from PIL import Image
 
 
 ## Model hyperparameters
@@ -26,12 +27,13 @@ for episode in datasetRemote:
     goal_img = cv2.resize(np.array(episode[-1]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1]))  
     for i in range(len(episode)): ## Resize images to reduce computation
         # action = torch.as_tensor(action) # grab first dimention
-        dataset_tmp["img"].append(cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1])) )
-        dataset_tmp["action"].append(episode[i]['action']['world_vector'])
-        dataset_tmp["rotation_delta"].append(episode[i]['action']['rotation_delta'])
+        obs = cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1]))
+        dataset_tmp["img"].append(Image.fromarray(obs.astype('uint8') ))
+        dataset_tmp["action"].append([episode[i]['action']['world_vector']])
+        dataset_tmp["rotation_delta"].append([episode[i]['action']['rotation_delta']])
         dataset_tmp["open_gripper"].append([np.array(episode[i]['action']['open_gripper'], dtype=np.uint8)])
         dataset_tmp["goal"].append(episode[i]['observation']['natural_language_instruction'].numpy().decode())
-        dataset_tmp["goal_img"].append(goal_img)
+        dataset_tmp["goal_img"].append(Image.fromarray(goal_img.astype('uint8') ))
 
 # here are all the unique characters that occur in this text
 chars = sorted(list(set([item for row in dataset_tmp["goal"] for item in row]))) ## Flatten to a long string
@@ -46,12 +48,12 @@ print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 
 print("Dataset shape:", len(dataset_tmp["img"]))
 dataset = {}
-dataset["img"] = np.array(dataset_tmp["img"], dtype=np.uint8)
+dataset["img"] = dataset_tmp["img"]
 dataset["action"] = np.array(dataset_tmp["action"], dtype=np.float32)
 dataset["rotation_delta"] = np.array(dataset_tmp["rotation_delta"], dtype=np.float32)
 dataset["open_gripper"] = np.array(dataset_tmp["open_gripper"], dtype=np.uint8)
 dataset["goal"] = dataset_tmp["goal"]
-dataset["goal_img"] = np.array(dataset_tmp["goal_img"], dtype=np.uint8)
+dataset["goal_img"] = dataset_tmp["goal_img"]
 
 # dataset = {"train": dataset_tmp} 
 
@@ -60,15 +62,15 @@ import datasets
 from datasets import ClassLabel, Value, Image, Features, Array2D, Array4D, Sequence, Array3D
 features = Features({
     'goal': Value('string'),
-    'img': Array4D(shape=dataset["img"].shape, dtype='uint8'),
-    'goal_img': Array4D(shape=dataset["goal_img"].shape, dtype='uint8'),
-    'rotation_delta': Array2D(shape=dataset["rotation_delta"].shape, dtype="float32"),
-    'open_gripper': Array2D(shape=dataset["open_gripper"].shape, dtype="bool"),
+    'img': Image(),
+    'goal_img': Image(),
+    'rotation_delta': Array2D(shape=(1, 3), dtype="float32"),
+    'open_gripper': Array2D(shape=(1, 3), dtype="bool"),
     'action': Array2D(shape=dataset["action"].shape, dtype="float32"),
     ## Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None)
 })
 
-ds = Dataset.from_dict(dataset)
+ds = Dataset.from_dict(dataset, features)
 # ds.add_column(name="img", column=dataset["img"])
 # ds = ds.train_test_split(test_size=0.1)
 print("Dataset: ", ds)

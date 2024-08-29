@@ -33,20 +33,20 @@ dropout = 0.1
 ## Model hyperparameters
 action_bins = 10
 image_shape = [64, 64, 3]
-name = 'mini-bridge-mini64px'
+name = 'mini-bridge-test3'
 
 from datasets import load_dataset, load_from_disk
 dataset = load_dataset("gberseth/" + name, split='train')
 ## dataset = load_from_disk("datasets/mini-bridge.hf")
 print('Features:', dataset.features)
-dataset = dataset.with_format("np")
-print('Features:', dataset.features)
+# dataset = dataset.with_format("np")
+# print('Features:', dataset.features)
 dataset_tmp = {
-    "img": np.array(dataset["img"]), ## This cast seems to take a long time...
+    "img": np.array(dataset["img"], dtype=np.uint8), ## This cast seems to take a long time...
     "action": np.concatenate((np.array(dataset["action"]), 
                               np.array(dataset["rotation_delta"]), 
                               np.array(dataset["open_gripper"])), axis=1),
-    "goal_img": np.array(dataset["goal_img"]),
+    "goal_img": np.array(dataset["goal_img"], dtype=np.uint8),
     "goal": dataset["goal"]
 }
 block_size = shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
