@@ -33,7 +33,7 @@ dropout = 0.1
 ## Model hyperparameters
 action_bins = 10
 image_shape = [64, 64, 3]
-name = 'mini-bridge-mini'
+name = 'mini-bridge-test2'
 
 from datasets import load_dataset, load_from_disk
 dataset = load_dataset("gberseth/" + name, split='train')
