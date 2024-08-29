@@ -55,20 +55,24 @@ dataset_tmp["goal_img"] = np.array(dataset_tmp["goal_img"], dtype=np.uint8)
 dataset = {"train": dataset_tmp} 
 
 from datasets import Dataset
+import datasets
 from datasets import ClassLabel, Value, Image, Features
-features = Features({
-    'goal': Value('string'),
-    'img': Image(),
-    'goal_img': Image(),
-    'rotation_delta': Value('float'),
-    'open_gripper': Value('string'),
-    'action': Value('string'),
-    ## Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None)
+# features = Features({
+#     'goal': Value('string'),
+#     'img': Image(),
+#     'goal_img': Image(),
+#     'rotation_delta': datasets.Sequence(datasets.Value("float32")),
+#     'open_gripper': datasets.Sequence(datasets.Value("float32")),
+#     'action': datasets.Sequence(datasets.Value("float32")),
+#     ## Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None)
 
-})
+# })
 ds = Dataset.from_dict(dataset_tmp)
 # ds = ds.train_test_split(test_size=0.1)
 print("Dataset: ", ds)
+ds = ds.with_format("np")
+print("Dataset: ", ds)
+
 new_features = ds.features.copy()
 new_features["img"] = Image()
 ds.cast(new_features)
