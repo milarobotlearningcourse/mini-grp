@@ -7,8 +7,8 @@ import cv2
 
 ## Model hyperparameters
 image_shape = [64, 64, 3]
-num_episodes = 1 ## How many episodes to grab from the dataset for training
-name = 'mini-bridge-test2'
+num_episodes = 10 ## How many episodes to grab from the dataset for training
+name = 'mini-bridge-test3'
 
 from datasets import load_dataset
 
@@ -25,14 +25,12 @@ for episode in datasetRemote:
     episode = list(episode['steps'])
     goal_img = cv2.resize(np.array(episode[-1]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1]))  
     for i in range(len(episode)): ## Resize images to reduce computation
-        obs = cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1])) 
-        goal = episode[i]['observation']['natural_language_instruction'].numpy().decode()
         # action = torch.as_tensor(action) # grab first dimention
-        dataset_tmp["img"].append(obs)
-        dataset_tmp["action"].append(np.array(episode[i]['action']['world_vector']))
-        dataset_tmp["rotation_delta"].append(np.array(episode[i]['action']['rotation_delta']))
-        dataset_tmp["open_gripper"].append(np.array(episode[i]['action']['open_gripper']))
-        dataset_tmp["goal"].append(goal)
+        dataset_tmp["img"].append(cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1])) )
+        dataset_tmp["action"].append(episode[i]['action']['world_vector'])
+        dataset_tmp["rotation_delta"].append(episode[i]['action']['rotation_delta'])
+        dataset_tmp["open_gripper"].append([np.array(episode[i]['action']['open_gripper'], dtype=np.uint8)])
+        dataset_tmp["goal"].append(episode[i]['observation']['natural_language_instruction'].numpy().decode())
         dataset_tmp["goal_img"].append(goal_img)
 
 # here are all the unique characters that occur in this text
@@ -49,10 +47,10 @@ print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 print("Dataset shape:", len(dataset_tmp["img"]))
 dataset = {}
 dataset["img"] = np.array(dataset_tmp["img"], dtype=np.uint8)
-# dataset["action"] = np.array(dataset_tmp["action"], dtype=np.float32)
-# dataset["rotation_delta"] = np.array(dataset_tmp["rotation_delta"], dtype=np.float32)
-# dataset["open_gripper"] = np.array(dataset_tmp["open_gripper"], dtype=np.float32)
-# dataset_tmp["goal"] = np.array(dataset_tmp["goal"], dtype=np.float32)
+dataset["action"] = np.array(dataset_tmp["action"], dtype=np.float32)
+dataset["rotation_delta"] = np.array(dataset_tmp["rotation_delta"], dtype=np.float32)
+dataset["open_gripper"] = np.array(dataset_tmp["open_gripper"], dtype=np.uint8)
+dataset["goal"] = dataset_tmp["goal"]
 dataset["goal_img"] = np.array(dataset_tmp["goal_img"], dtype=np.uint8)
 
 # dataset = {"train": dataset_tmp} 
@@ -60,29 +58,32 @@ dataset["goal_img"] = np.array(dataset_tmp["goal_img"], dtype=np.uint8)
 from datasets import Dataset
 import datasets
 from datasets import ClassLabel, Value, Image, Features, Array2D, Array4D, Sequence, Array3D
-# features = Features({
-#     'goal': Value('string'),
-#     'img': Sequence(Array3D(shape=dataset_tmp["img"].shape[1:], dtype='uint8')),
-#     'goal_img': Sequence(Array3D(shape=dataset_tmp["goal_img"].shape[1:], dtype='uint8')),
-#     'rotation_delta': Array2D(shape=dataset_tmp["rotation_delta"].shape, dtype="float32"),
-#     'open_gripper': Array2D(shape=dataset_tmp["open_gripper"].shape, dtype="bool"),
-#     'action': Array2D(shape=dataset_tmp["action"].shape, dtype="float32"),
-#     ## Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None)
+features = Features({
+    'goal': Value('string'),
+    'img': Array4D(shape=dataset["img"].shape, dtype='uint8'),
+    'goal_img': Array4D(shape=dataset["goal_img"].shape, dtype='uint8'),
+    'rotation_delta': Array2D(shape=dataset["rotation_delta"].shape, dtype="float32"),
+    'open_gripper': Array2D(shape=dataset["open_gripper"].shape, dtype="bool"),
+    'action': Array2D(shape=dataset["action"].shape, dtype="float32"),
+    ## Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None)
+})
 
-# })
 ds = Dataset.from_dict(dataset)
+# ds.add_column(name="img", column=dataset["img"])
 # ds = ds.train_test_split(test_size=0.1)
 print("Dataset: ", ds)
-ds = ds.with_format("np")
+# ds = ds.with_format("np")
 print("Dataset: ", ds)
 
 new_features = ds.features.copy()
-new_features["img"] = Array3D(shape=dataset["img"].shape[1:], dtype='uint8')
+new_features["img"] = Image()
 # new_features["img"] = Sequence(Array3D(shape=dataset_tmp["img"].shape[1:], dtype='uint8'))
 # new_features["goal_img"] = Array3D(shape=dataset["goal_img"].shape[1:], dtype='uint8')
-# new_features["action"] = Array1D(shape=dataset_tmp["action"].shape, dtype="float32")
-# new_features["rotation_delta"] = Array2D(shape=dataset_tmp["rotation_delta"].shape, dtype="float32")
-# new_features["open_gripper"] = Array2D(shape=dataset_tmp["open_gripper"].shape, dtype="float32")
+# new_features["action"] = Value('float')
+# new_features["rotation_delta"] = Value('float')
+# new_features["open_gripper"] = Value('bool')
+# new_features["goal"] = Value('string'),
 ds.cast(new_features)
+print('Features:', ds.features)
 ds.save_to_disk("datasets/" + name + ".hf")
 ds.push_to_hub("gberseth/" + name)
