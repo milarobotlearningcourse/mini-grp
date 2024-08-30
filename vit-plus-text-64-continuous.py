@@ -12,12 +12,12 @@ from tqdm import tqdm, trange
 import cv2
 
 # hyperparameters
-batch_size = 64 # how many independent sequences will we process in parallel?
+batch_size = 512 # how many independent sequences will we process in parallel?
 block_size = 32 # what is the maximum context length for predictions?
 vocab_size = n_patches = 8
 max_iters = 10000
 eval_interval = 100
-learning_rate = 1e-4
+learning_rate = 3e-4
 # device = 'cpu'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
@@ -28,12 +28,12 @@ n_embd = 64
 torch.manual_seed(1337)
 n_head = 8
 n_blocks = 4
-dropout = 0.1
+dropout = 0.0
 
 ## Model hyperparameters
 action_bins = 10
 image_shape = [64, 64, 3]
-name = 'mini-bridge-test3'
+name = 'mini-bridge-mini64pix'
 
 from datasets import load_dataset, load_from_disk
 dataset = load_dataset("gberseth/" + name, split='train')
@@ -52,7 +52,7 @@ dataset_tmp = {
 block_size = shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
 
 print("Dataset shape:", len(dataset_tmp["img"]))
-batch_size = min(64, len(dataset_tmp["img"]))
+batch_size = min(batch_size, len(dataset_tmp["img"]))
 # here are all the unique characters that occur in this text
 chars = sorted(list(set([item for row in dataset_tmp["goal"] for item in row]))) ## Flatten to a long string
 vocab_size = len(chars)
@@ -69,12 +69,12 @@ print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 ## Get the actions and encode them to map to [-1, 1]
 a_min = dataset_tmp["action"].min(axis=0) - 0.001 ## Get the min and max bound for the actions to use for bining 
 a_max = dataset_tmp["action"].max(axis=0) 
-a_std, a_mean = (dataset_tmp["action"].std(axis=0) + 0.001) * 3.0, dataset_tmp["action"].mean(axis=0)
+a_std, a_mean = (dataset_tmp["action"].std(axis=0) + 0.001) * 1.0, dataset_tmp["action"].mean(axis=0)
 action_bins = len(a_mean)
 s_std, s_mean = dataset_tmp["img"].std(axis=0), dataset_tmp["img"].mean(axis=0) 
 a_max = a_max + ((a_max - a_min) / 20.0) ## + a little to avoid using action_bins + 1 for the action = max
 encode_action = lambda af:   (((af - a_mean)/(a_std))).astype(np.float32) # encoder: take a float, output an integer
-encode_state = lambda af:   (af/(255.0)).astype(np.float32) # encoder: take a float, output an integer
+encode_state = lambda af:   ((af/(255.0)*2.0)-1.0).astype(np.float32) # encoder: take a float, output an integer
 resize_state = lambda sf:   cv2.resize(np.array(sf, dtype=np.float32), (image_shape[0], image_shape[1]))  # resize state
 decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
 # for i in range(len(dataset_tmp["action"])): ## Convert to classes
@@ -264,32 +264,36 @@ class GRP(nn.Module):
         B, C = targets.shape
         # targets = targets.view(B)
         out = out.view(B, C)
+        # diff = torch.abs(torch.mean(out - targets, axis=0))
+        # print ("diff:", diff) ## Let's see which dimensions have the larges errors
         loss = F.mse_loss(out, targets) ## B, C
     return (out, loss)
 
 if __name__ == "__main__":
     import wandb
+    import torch.optim.lr_scheduler as lr_scheduler
     # start a new wandb run to track this script
-    # wandb.init(
-    #     # set the wandb project where this run will be logged
-    #     project="mini-grp",
-
-    #     # track hyperparameters and run metadata
-    #     config={
-    #     "learning_rate": learning_rate,
-    #     "architecture": "VIT",
-    #     "dataset": "EleutherAI/cifarnet",
-    #     "epochs": max_iters,
-    #     }
-    # )
-    # wandb.run.log_code(".")
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="mini-grp",
+        # track hyperparameters and run metadata
+        config={
+        "learning_rate": learning_rate,
+        "architecture": "GRP",
+        "dataset": name,
+        "epochs": max_iters,
+        },
+        save_code=True
+    )
+    wandb.run.log_code(".")
     model = GRP()
     m = model.to(device)
     # print the number of parameters in the model
     print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
     # create a PyTorch optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.1)
+    scheduler = lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=max_iters)
 
     for iter in range(max_iters):
 
@@ -298,18 +302,19 @@ if __name__ == "__main__":
             losses = estimate_loss()
             ## Really want the loss to start out 0.2 or less.
             print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-            # wandb.log({"train loss": losses['train'], "val loss": losses['val']})
+            wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
         # sample a batch of data
         xb, x2b, yb = get_batch('train')
 
         # evaluate the loss
         logits, loss = model(xb, x2b, yb)
-        optimizer.zero_grad(set_to_none=True)
+        optimizer.zero_grad(set_to_none=False)
         loss.backward()
+        nn.utils.clip_grad_value_(model.parameters(), 1)
         optimizer.step()
 
     # generate from the model
     # context = torch.zeros((1, 1), dtype=torch.long, device=device)
     # print(decode(m.generate(context, max_new_tokens=2000)[0].tolist()))
-    # wandb.finish()
+    wandb.finish()

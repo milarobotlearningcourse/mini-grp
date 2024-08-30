@@ -8,8 +8,8 @@ from PIL import Image
 
 ## Model hyperparameters
 image_shape = [64, 64, 3]
-num_episodes = 10 ## How many episodes to grab from the dataset for training
-name = 'mini-bridge-test3'
+num_episodes = 2000 ## How many episodes to grab from the dataset for training
+name = 'mini-bridge-mini64pix'
 
 from datasets import load_dataset
 
@@ -29,8 +29,8 @@ for episode in datasetRemote:
         # action = torch.as_tensor(action) # grab first dimention
         obs = cv2.resize(np.array(episode[i]['observation']['image'], dtype=np.float32), (image_shape[0], image_shape[1]))
         dataset_tmp["img"].append(Image.fromarray(obs.astype('uint8') ))
-        dataset_tmp["action"].append([episode[i]['action']['world_vector']])
-        dataset_tmp["rotation_delta"].append([episode[i]['action']['rotation_delta']])
+        dataset_tmp["action"].append(episode[i]['action']['world_vector'])
+        dataset_tmp["rotation_delta"].append(episode[i]['action']['rotation_delta'])
         dataset_tmp["open_gripper"].append([np.array(episode[i]['action']['open_gripper'], dtype=np.uint8)])
         dataset_tmp["goal"].append(episode[i]['observation']['natural_language_instruction'].numpy().decode())
         dataset_tmp["goal_img"].append(Image.fromarray(goal_img.astype('uint8') ))
@@ -60,17 +60,17 @@ dataset["goal_img"] = dataset_tmp["goal_img"]
 from datasets import Dataset
 import datasets
 from datasets import ClassLabel, Value, Image, Features, Array2D, Array4D, Sequence, Array3D
-features = Features({
-    'goal': Value('string'),
-    'img': Image(),
-    'goal_img': Image(),
-    'rotation_delta': Array2D(shape=(1, 3), dtype="float32"),
-    'open_gripper': Array2D(shape=(1, 3), dtype="bool"),
-    'action': Array2D(shape=dataset["action"].shape, dtype="float32"),
-    ## Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None)
-})
+# features = Features({
+#     'goal': Value('string'),
+#     'img': Image(),
+#     'goal_img': Image(),
+#     'rotation_delta': Array2D(shape=(1, 3), dtype="float32"),
+#     'open_gripper': Array2D(shape=(1, 1), dtype="uint8"),
+#     'action': Array2D(shape=(1, 3), dtype="float32"),
+#     ## Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None)
+# })
 
-ds = Dataset.from_dict(dataset, features)
+ds = Dataset.from_dict(dataset)
 # ds.add_column(name="img", column=dataset["img"])
 # ds = ds.train_test_split(test_size=0.1)
 print("Dataset: ", ds)
