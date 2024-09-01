@@ -12,32 +12,35 @@ from tqdm import tqdm, trange
 import cv2
 
 # hyperparameters
-batch_size = 64 # how many independent sequences will we process in parallel?
-block_size = 32 # what is the maximum context length for predictions?
-vocab_size = n_patches = 8
-max_iters = 10000
-eval_interval = 100
-learning_rate = 1e-4
-# device = 'cpu'
+config = {
+    "batch_size": 64, # how many independent sequences will we process in parallel?
+    "block_size": 32, # what is the maximum context length for predictions?
+    "n_patches": 8,
+    "max_iters": 10000,
+    "eval_interval": 100,
+    "learning_rate": 1e-4,
+    # device = 'cpu'
+    "eval_iters": 200,
+    "n_embd": 256,
+    # ------------
+
+    "r_seed": 1337,
+    "n_head": 16,
+    "n_blocks": 4,
+    "dropout": 0.1,
+
+    ## Model hyperparameters
+    "action_bins": 10,
+    "image_shape": [64, 64, 3],
+    "dataset": "EleutherAI/cifarnet",
+    "trim": 1000000
+}
+torch.manual_seed(config["r_seed"])
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
-eval_iters = 200
-n_embd = 256
-# ------------
-
-torch.manual_seed(1337)
-n_head = 16
-n_blocks = 4
-dropout = 0.1
-
-## Model hyperparameters
-action_bins = 10
-image_shape = [64, 64, 3]
-name = "EleutherAI/cifarnet"
 
 from datasets import load_dataset
-
-ds = load_dataset(name)
+ds = load_dataset(config["dataset"])
 
 print('Features:', ds["train"].features)
 # np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
