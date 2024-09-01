@@ -33,10 +33,11 @@ dropout = 0.1
 ## Model hyperparameters
 action_bins = 10
 image_shape = [64, 64, 3]
+name = "EleutherAI/cifarnet"
 
 from datasets import load_dataset
 
-ds = load_dataset("EleutherAI/cifarnet")
+ds = load_dataset(name)
 
 print('Features:', ds["train"].features)
 # np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)

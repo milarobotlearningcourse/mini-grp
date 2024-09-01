@@ -11,7 +11,7 @@ from tqdm import tqdm, trange
 import cv2
 
 # hyperparameters
-batch_size = 512 # how many independent sequences will we process in parallel?
+batch_size = 256 # how many independent sequences will we process in parallel?
 block_size = 32 # what is the maximum context length for predictions?
 vocab_size = n_patches = 8
 max_iters = 10000
@@ -21,13 +21,13 @@ learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
 eval_iters = 200
-n_embd = 64
+n_embd = 128
 # ------------
 
 torch.manual_seed(1337)
 n_head = 8
 n_blocks = 4
-dropout = 0.0
+dropout = 0.1
 
 ## Model hyperparameters
 action_bins = 10
@@ -42,9 +42,10 @@ print('Features:', dataset.features)
 # print('Features:', dataset.features)
 dataset_tmp = {
     "img": np.array(dataset["img"], dtype=np.uint8), ## This cast seems to take a long time...
-    "action": np.concatenate((np.array(dataset["action"]), 
-                              np.array(dataset["rotation_delta"]), 
-                              np.array(dataset["open_gripper"])), axis=1),
+    # "action": np.concatenate((np.array(dataset["action"]), 
+    #                           np.array(dataset["rotation_delta"]), 
+    #                           np.array(dataset["open_gripper"])), axis=1),
+    "action": np.array(dataset["action"]),
     "goal_img": np.array(dataset["goal_img"], dtype=np.uint8),
     "goal": dataset["goal"]
 }
@@ -68,7 +69,7 @@ print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 ## Get the actions and encode them to map to [-1, 1]
 a_min = dataset_tmp["action"].min(axis=0) - 0.001 ## Get the min and max bound for the actions to use for bining 
 a_max = dataset_tmp["action"].max(axis=0) 
-a_std, a_mean = (dataset_tmp["action"].std(axis=0) + 0.001) * 1.0, dataset_tmp["action"].mean(axis=0)
+a_std, a_mean = (dataset_tmp["action"].std(axis=0) + 0.001) * 1.5, dataset_tmp["action"].mean(axis=0)
 action_bins = len(a_mean)
 s_std, s_mean = dataset_tmp["img"].std(axis=0), dataset_tmp["img"].mean(axis=0) 
 a_max = a_max + ((a_max - a_min) / 20.0) ## + a little to avoid using action_bins + 1 for the action = max
@@ -210,7 +211,7 @@ class GRP(nn.Module):
     super(GRP, self).__init__()
     ## Text processing portion
     # self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-    self.register_buffer('positional_embeddings', calc_positional_embeddings(1 + (n_patches ** 2) + (n_patches ** 2), n_embd), persistent=False)
+    self.register_buffer('positional_embeddings', calc_positional_embeddings(1 + (n_patches ** 2), n_embd), persistent=False)
     self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
 
     #Positional embedding
@@ -236,16 +237,16 @@ class GRP(nn.Module):
     n, c, h, w = images.shape
     # B, T = goals.shape
     patches = get_patches_fast(images)
-    patches_g = get_patches_fast(goal_img)
+    # patches_g = get_patches_fast(goal_img)
     # goals_e = self.token_embedding_table(goals)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
     out = self.lin_map(patches)
-    out_g = self.lin_map(patches_g)
+    # out_g = self.lin_map(patches_g)
     
     # Adding classification token to the tokens
-    out = torch.cat((self.class_tokens.expand(n, 1, -1), out, out_g), dim=1)
+    out = torch.cat((self.class_tokens.expand(n, 1, -1), out), dim=1)
     # out = torch.cat([out, goals_e], dim=1) ## Add text and goal image encoding to begining of encoding.
     
     # Adding positional embedding
