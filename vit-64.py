@@ -253,7 +253,7 @@ def my_main(cfg: DictConfig):
             wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
         # sample a batch of data
-        xb, yb = get_batch_vit('train', cfg.batch_size)
+        xb, yb = get_batch_vit('train', dataset, cfg.batch_size)
 
         # evaluate the loss
         logits, loss = model(xb, yb)
