@@ -33,11 +33,13 @@ dropout = 0.0
 ## Model hyperparameters
 action_bins = 10
 image_shape = [64, 64, 3]
+name = "mini-bridge-mini64pix"
+from datasets import load_dataset, load_from_disk
+dataset = load_dataset("gberseth/" + name, split='train')
+## dataset = load_from_disk("datasets/mini-bridge.hf")
+print('Features:', dataset.features)
 
-from datasets import load_dataset
 
-from datasets import load_dataset
-dataset = load_dataset("gberseth/mini-oxe", split='train')
 dataset_tmp = {
     "img": np.array(dataset["img"]),
     "action": np.concatenate((np.array(dataset["action"]), 
@@ -78,7 +80,7 @@ decode_action = lambda binN: (binN * spacing) + a_min  # decoder: take a list of
 for i in range(len(dataset_tmp["action"])): ## Convert to classes
     dataset_tmp["action"][i] = encode_action(dataset_tmp["action"][i])
 dataset_tmp["action"] = dataset_tmp["action"][:,:1] ## Grab just the first dimension for the action
-encode_state = lambda af:   (af/(255.0)).astype(np.float32) # encoder: take a float, output an integer
+encode_state = lambda af:   ((af/(255.0)*2.0)-1.0).astype(np.float32) # encoder: take a float, output an integer
 resize_state = lambda sf:   cv2.resize(np.array(sf, dtype=np.float32), (image_shape[0], image_shape[1]))  # resize state
 decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
 

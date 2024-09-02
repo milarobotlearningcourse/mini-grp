@@ -11,54 +11,9 @@ import numpy as np
 from tqdm import tqdm, trange
 import cv2
 
-# hyperparameters
-config = {
-    "batch_size": 64, # how many independent sequences will we process in parallel?
-    "block_size": 32, # what is the maximum context length for predictions?
-    "n_patches": 8,
-    "max_iters": 10000,
-    "eval_interval": 100,
-    "learning_rate": 1e-4,
-    # device = 'cpu'
-    "eval_iters": 200,
-    "n_embd": 256,
-    # ------------
-
-    "r_seed": 1337,
-    "n_head": 16,
-    "n_blocks": 4,
-    "dropout": 0.1,
-
-    ## Model hyperparameters
-    "action_bins": 10,
-    "image_shape": [64, 64, 3],
-    "dataset": "EleutherAI/cifarnet",
-    "trim": 1000000
-}
-torch.manual_seed(config["r_seed"])
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
-
-from datasets import load_dataset
-
-ds = load_dataset(config["dataset"])
-
-print('Features:', ds["train"].features)
-# np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
-trim = 1000000 ## Lets see how little data is needed to still get good performance. 1000 is not enough.
-dataset = {}
-dataset["train"]= {
-           "img": torch.tensor(np.array(ds["train"]["img"][:trim], dtype=np.uint8)).to(device),
-           "label": torch.tensor(np.array(ds["train"]["label"][:trim], dtype=np.uint8)).to(device) 
-          }         
-dataset["test"]=  {
-           "img": torch.tensor(np.array(ds["test"]["img"][:trim], dtype=np.uint8)).to(device),
-           "label": torch.tensor(np.array(ds["test"]["label"][:trim], dtype=np.uint8)).to(device)
-         }
-
 
 # data loading
-def get_batch_vit(split):
+def get_batch_vit(split, dataset, batch_size):
     # generate a small batch of inputs x and targets y
     data = dataset['train'] if split == 'train' else dataset['test']
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
@@ -75,13 +30,13 @@ def calc_positional_embeddings(sequence_length, d):
     return result
 
 @torch.no_grad()
-def estimate_loss():
+def estimate_loss(model):
     out = {}
     model.eval()
     for split in ['train', 'val']:
-        losses = torch.zeros(eval_iters)
-        for k in range(eval_iters):
-            X, Y = get_batch_vit(split)
+        losses = torch.zeros(model._cfg.eval_iters)
+        for k in range(model._cfg.eval_iters):
+            X, Y = get_batch_vit(split, model._dataset, model._cfg.batch_size)
             logits, loss = model(X, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
@@ -91,7 +46,7 @@ def estimate_loss():
 def get_patches_fast(images):
     from einops import rearrange
     batch_size, channels, height, width = images.shape
-    patch_size = height // n_patches
+    patch_size = height // 8 ## n_patches = 8
 
     p = patch_size # P in maths
 
@@ -109,7 +64,7 @@ def calc_positional_embeddings(sequence_length, d):
 class Head(nn.Module):
     """ one head of self-attention """
 
-    def __init__(self, head_size):
+    def __init__(self, head_size, n_embd, dropout):
         super().__init__()
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
@@ -135,9 +90,9 @@ class Head(nn.Module):
 class MultiHeadAttention(nn.Module):
     """ multiple heads of self-attention in parallel """
 
-    def __init__(self, num_heads, head_size):
+    def __init__(self, num_heads, head_size, n_embd, dropout):
         super().__init__()
-        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        self.heads = nn.ModuleList([Head(head_size, n_embd=n_embd, dropout=dropout) for _ in range(num_heads)])
         self.proj = nn.Linear(n_embd, n_embd)
         self.dropout = nn.Dropout(dropout)
 
@@ -149,7 +104,7 @@ class MultiHeadAttention(nn.Module):
 class FeedFoward(nn.Module):
     """ a simple linear layer followed by a non-linearity """
 
-    def __init__(self, n_embd):
+    def __init__(self, n_embd, dropout):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),
@@ -164,12 +119,12 @@ class FeedFoward(nn.Module):
 class Block(nn.Module):
     """ Transformer block: communication followed by computation """
 
-    def __init__(self, n_embd, n_head):
+    def __init__(self, n_embd, n_head, dropout):
         # n_embd: embedding dimension, n_head: the number of heads we'd like
         super().__init__()
         head_size = n_embd // n_head
-        self.sa = MultiHeadAttention(n_head, head_size)
-        self.ffwd = FeedFoward(n_embd)
+        self.sa = MultiHeadAttention(n_head, head_size, n_embd=n_embd, dropout=dropout)
+        self.ffwd = FeedFoward(n_embd, dropout)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
 
@@ -179,37 +134,39 @@ class Block(nn.Module):
         return x
 
 class VIT(nn.Module):
-  def __init__(self, mlp_ratio=4):
+  def __init__(self, dataset, cfg, mlp_ratio=4):
     super(VIT, self).__init__()
+    self._dataset = dataset
+    self._cfg = cfg
     # assert shape[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
     # assert shape[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
-    self.patch_size = (image_shape[0] / n_patches, image_shape[1] / n_patches)
+    self.patch_size = (cfg.image_shape[0] / cfg.n_patches, cfg.image_shape[1] / cfg.n_patches)
 
     #Positional embedding
     # self.pos_embed = nn.Parameter(torch.tensor(positional_embeddings(n_patches ** 2 + 1, embedding_size)))
     # self. pos_embed.requires_grad = False
-    self.register_buffer('positional_embeddings', calc_positional_embeddings(n_patches ** 2 + 1, n_embd), persistent=False)
+    self.register_buffer('positional_embeddings', calc_positional_embeddings(cfg.n_patches ** 2 + 1, cfg.n_embd), persistent=False)
     # self.position_embedding_table = nn.Embedding(n_patches ** 2 + 1, n_embd)
     
-    self.class_tokens = nn.Parameter(torch.rand(1, n_embd))
+    self.class_tokens = nn.Parameter(torch.rand(1, cfg.n_embd))
 
-    self.input_d = int(image_shape[2] * self.patch_size[0] * self.patch_size[1])
+    self.input_d = int(cfg.image_shape[2] * self.patch_size[0] * self.patch_size[1])
 
-    self.lin_map = nn.Linear(self.input_d, n_embd, bias=False) 
+    self.lin_map = nn.Linear(self.input_d, cfg.n_embd, bias=False) 
 
     # 4) Transformer encoder blocks
-    self.blocks = nn.ModuleList([Block(n_embd, n_head) for _ in range(n_blocks)])
+    self.blocks = nn.ModuleList([Block(cfg.n_embd, cfg.n_head, dropout=self._cfg.dropout) for _ in range(cfg.n_blocks)])
 
     # 5) Classification MLPk
     self.mlp = nn.Sequential(
-        nn.Linear(n_embd, action_bins),
+        nn.Linear(cfg.n_embd, cfg.action_bins),
         nn.Softmax(dim=-1)
     )
 
   def forward(self, images, targets=None):
     # Dividing images into patches
     n, c, h, w = images.shape
-    patches = get_patches_fast(images).to(device)
+    patches = get_patches_fast(images)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
@@ -241,7 +198,34 @@ class VIT(nn.Module):
         loss = F.cross_entropy(logits, targets)
     return (logits, loss)
 
-if __name__ == "__main__":
+import hydra, json
+from omegaconf import DictConfig, OmegaConf
+
+@hydra.main(config_path="conf", config_name="vit-64")
+def my_main(cfg: DictConfig):
+    torch.manual_seed(cfg.r_seed)
+    print ("cfg:", OmegaConf.to_yaml(cfg))
+    # print (vars(cfg))
+    print (OmegaConf.to_container(cfg))
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
+
+    from datasets import load_dataset
+    ds = load_dataset(cfg.dataset)
+
+    print('Features:', ds["train"].features)
+    # np.reshape(np.array(x["img"][i].getdata(), dtype=np.float32)
+    trim = 1000000 ## Lets see how little data is needed to still get good performance. 1000 is not enough.
+    dataset = {}
+    dataset["train"]= {
+            "img": torch.tensor(np.array(ds["train"]["img"][:trim], dtype=np.uint8)).to(device),
+            "label": torch.tensor(np.array(ds["train"]["label"][:trim], dtype=np.uint8)).to(device) 
+            }         
+    dataset["test"]=  {
+            "img": torch.tensor(np.array(ds["test"]["img"][:trim], dtype=np.uint8)).to(device),
+            "label": torch.tensor(np.array(ds["test"]["label"][:trim], dtype=np.uint8)).to(device)
+            }
+    # print ("Results:", results)
     import wandb
     # start a new wandb run to track this script
     wandb.init(
@@ -249,32 +233,27 @@ if __name__ == "__main__":
         project="mini-vit",
 
         # track hyperparameters and run metadata
-        config={
-        "learning_rate": 0.02,
-        "architecture": "VIT",
-        "dataset": "EleutherAI/cifarnet",
-        "epochs": max_iters,
-        }
+        config= OmegaConf.to_container(cfg)
     )
     wandb.run.log_code(".")
-    model = VIT()
+    model = VIT(dataset, cfg)
     m = model.to(device)
     # print the number of parameters in the model
     print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
     # create a PyTorch optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate)
 
-    for iter in range(max_iters):
+    for iter in range(cfg.max_iters):
 
         # every once in a while evaluate the loss on train and val sets
-        if iter % eval_interval == 0 or iter == max_iters - 1:
-            losses = estimate_loss()
+        if iter % cfg.eval_interval == 0 or iter == cfg.max_iters - 1:
+            losses = estimate_loss(model)
             print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
             wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
         # sample a batch of data
-        xb, yb = get_batch_vit('train')
+        xb, yb = get_batch_vit('train', dataset, cfg.batch_size)
 
         # evaluate the loss
         logits, loss = model(xb, yb)
@@ -286,3 +265,8 @@ if __name__ == "__main__":
     context = torch.zeros((1, 1), dtype=torch.long, device=device)
     # print(decode(m.generate(context, max_new_tokens=2000)[0].tolist()))
     wandb.finish()
+    return None
+
+if __name__ == "__main__":
+    import os
+    results = my_main()

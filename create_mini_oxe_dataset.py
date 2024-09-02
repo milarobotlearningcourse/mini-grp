@@ -8,8 +8,8 @@ from PIL import Image
 
 ## Model hyperparameters
 image_shape = [64, 64, 3]
-num_episodes = 2000 ## How many episodes to grab from the dataset for training
-name = 'mini-bridge-mini64pix'
+num_episodes = 2 ## How many episodes to grab from the dataset for training
+name = 'mini-bridge-test'
 
 from datasets import load_dataset
 
