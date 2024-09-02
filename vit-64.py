@@ -265,8 +265,9 @@ def my_main(cfg: DictConfig):
     context = torch.zeros((1, 1), dtype=torch.long, device=device)
     # print(decode(m.generate(context, max_new_tokens=2000)[0].tolist()))
     wandb.finish()
-    return None
+    return losses['val']
 
 if __name__ == "__main__":
     import os
     results = my_main()
+    print("results:", results)

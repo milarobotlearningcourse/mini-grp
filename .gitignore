@@ -4,5 +4,7 @@ savedDatasets/
 wandb/
 SimplerEnv/
 ManiSkill2_real2sim/
+outputs/
+multirun/
 videos
 data
