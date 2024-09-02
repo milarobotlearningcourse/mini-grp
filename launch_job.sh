@@ -5,11 +5,9 @@
 #SBATCH --mem=16G
 #SBATCH --time=00:29:00
 
-
 # Echo time and hostname into log
 echo "Date:     $(date)"
 echo "Hostname: $(hostname)"
-
 
 # Ensure only anaconda/3 module loaded.
 module --quiet purge
