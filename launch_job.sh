@@ -1,6 +1,6 @@
  # distributed/single_gpu/job.sh -> good_practices/launch_many_jobs/job.sh
  #!/bin/bash
- #SBATCH --gpus-per-task=rtx8000:1
+ #SBATCH --gpus-per-task=1
  #SBATCH --cpus-per-task=4
  #SBATCH --ntasks-per-node=1
  #SBATCH --mem=16G
