@@ -1,0 +1,42 @@
+defaults:
+  - override hydra/sweeper: optuna
+  - override hydra/sweeper/sampler: tpe
+
+hydra:
+  sweeper:
+    sampler:
+      seed: 123
+    direction: minimize
+    study_name: vit-64-h-optim
+    storage: null
+    n_trials: 40
+    n_jobs: 2
+    params:
+      learning_rate: range(1e-5, 1e-4, step=2e-5)
+      dropout: choice(0.0, 0.1, 0.2)
+      n_embd: choice(64, 128, 256)
+  
+batch_size: 256 # how many independent sequences will we process in parallel?
+block_size: 32 # what is the maximum context length for predictions?
+n_patches: 8
+max_iters: 10000
+eval_interval: 100
+learning_rate: 5e-5
+# device = 'cpu'
+eval_iters: 200
+n_embd: 256
+# ------------
+
+r_seed: 1337
+n_head: 16
+n_blocks: 4
+dropout: 0.1
+action_bins: 10
+
+## Model hyperparameters
+image_shape: [64, 64, 3]
+dataset: gberseth/mini-bridge-mini64pix
+trim: 1000000
+
+# if true, simulate a failure by raising an exception
+error: false
