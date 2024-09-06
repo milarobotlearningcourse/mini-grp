@@ -155,7 +155,7 @@ class GRP(nn.Module):
 
     # 5) Classification MLPk
     self.mlp = nn.Sequential(
-        nn.Linear(cfg.n_embd, cfg.action_bins),
+        nn.Linear(cfg.n_embd, cfg.action_bins * 7),
         nn.Softmax(dim=-1)
     )
 
@@ -191,8 +191,9 @@ class GRP(nn.Module):
     else:
         # B,T,C = 4,8,2 # batch, time, channels
         B, C = logits.shape
-        # logits = logits.view(B*T, C)
-        targets = targets.view(B)
+        B, C = logits.shape
+        logits = logits.view(B, 10, 7)
+        targets = targets.view(B, 7)
         loss = F.cross_entropy(logits, targets)
     return (logits, loss)
 
