@@ -7,14 +7,14 @@ hydra:
     sampler:
       seed: 123
     direction: minimize
-    study_name: vit-64-h-optim
+    study_name: grp-64-h-optim
     storage: null
     n_trials: 40
     n_jobs: 2
     params:
       learning_rate: range(1e-5, 1e-4, step=2e-5)
       dropout: choice(0.0, 0.1, 0.2)
-      n_embd: choice(64, 128, 256)
+      n_embd: choice(64, 128, 256, 512)
       batch_size: choice(256, 512)
   
 batch_size: 256 # how many independent sequences will we process in parallel?

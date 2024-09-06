@@ -2,8 +2,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=16G
-#SBATCH --time=00:29:00
+#SBATCH --mem=32G
+#SBATCH --time=23:59:00
 
 # Echo time and hostname into log
 echo "Date:     $(date)"
@@ -29,7 +29,7 @@ conda activate roble
 unset CUDA_VISIBLE_DEVICES
  
 # Execute Python script
-python vit-64.py
+python vit-plus-goalIMG-64.py --multirun
 # Call main.py with all arguments passed to this script.
 # This allows you to call the script many times with different arguments.
 # Quotes around $@ prevent splitting of arguments that contain spaces.
