@@ -190,17 +190,17 @@ class GRP(nn.Module):
         loss = None
     else:
         # B,T,C = 4,8,2 # batch, time, channels
-        B, C = logits.shape
-        B, C = logits.shape
-        logits = logits.view(B, 10, 7)
-        targets = targets.view(B, 7)
+        B, C = targets.shape
+        # targets.view(B, 7)
+        logits = logits.view(B, self._cfg.action_bins, C)
+        # targets = targets.view(B, C)
         loss = F.cross_entropy(logits, targets)
     return (logits, loss)
 
 import hydra, json
 from omegaconf import DictConfig, OmegaConf
 
-@hydra.main(config_path="conf", config_name="bridge-64")
+@hydra.main(config_path="conf", config_name="bridge-64-multiClass")
 def my_main(cfg: DictConfig):
     torch.manual_seed(cfg.r_seed)
     print ("cfg:", OmegaConf.to_yaml(cfg))
@@ -233,7 +233,6 @@ def my_main(cfg: DictConfig):
     print("bins:", action_labels)
     # hist, bin_edges = np.histogram(action_labels, density=True, bins=cfg.action_bins)
     # print("action histogram:", hist)
-    # print("bin edges: ", bin_edges)
 
     ## Get the actions and encode them to map to [-1, 1]
     encode_state = lambda af:   ((af/(255.0)*2.0)-1.0).astype(np.float32) # encoder: take a float, output an integer
@@ -252,6 +251,7 @@ def my_main(cfg: DictConfig):
     dataset = {"train": dataset_tmp, "test": dataset_tmp} 
     # print ("Results:", results)
     import wandb
+    import torch.optim.lr_scheduler as lr_scheduler
     # start a new wandb run to track this script
     wandb.init(
         # set the wandb project where this run will be logged
@@ -268,6 +268,7 @@ def my_main(cfg: DictConfig):
 
     # create a PyTorch optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate)
+    scheduler = lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=cfg.max_iters)
 
     for iter in range(cfg.max_iters):
 
