@@ -229,7 +229,7 @@ def my_main(cfg: DictConfig):
     # print("bins:", action_labels)
     hist, bin_edges = np.histogram(action_labels, density=True, bins=cfg.action_bins)
     print("action histogram:", hist)
-    print("bin edges: ", bin_edges)
+    # print("bin edges: ", bin_edges)
 
     ## Get the actions and encode them to map to [-1, 1]
     encode_state = lambda af:   ((af/(255.0)*2.0)-1.0).astype(np.float32) # encoder: take a float, output an integer

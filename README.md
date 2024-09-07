@@ -15,7 +15,7 @@ pip install torch==2.4.0
 
 ### Install MilaTools
 
-pip install milatools decorator==4.4.2 moviepy==1.0.3
+pip install milatools==0.1.14 decorator==4.4.2 moviepy==1.0.3
 
 ## Dataset
 
