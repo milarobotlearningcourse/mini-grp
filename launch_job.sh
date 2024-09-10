@@ -29,7 +29,7 @@ conda activate roble
 unset CUDA_VISIBLE_DEVICES
  
 # Execute Python script
-python vit-plus-goalTXT-64.py --multirun
+python vit-plus-goalTXT-64-MultiClass.py --multirun
 # Call main.py with all arguments passed to this script.
 # This allows you to call the script many times with different arguments.
 # Quotes around $@ prevent splitting of arguments that contain spaces.

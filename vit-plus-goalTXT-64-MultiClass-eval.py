@@ -18,7 +18,7 @@ def get_batch_vit(split, dataset, batch_size):
     data = dataset['train'] if split == 'train' else dataset['test']
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
     x = torch.tensor(data["img"][ix], dtype=torch.float)
-    x_goal = torch.tensor(data["goal_img"][ix], dtype=torch.float)
+    x_goal = torch.tensor(data["goal"][ix], dtype=torch.long)
     y = torch.tensor(data["action"][ix], dtype=torch.long)
     # x, y = x.to(device), y.to(device)
     return x, x_goal, y
@@ -139,21 +139,23 @@ class GRP(nn.Module):
     super(GRP, self).__init__()
     self._dataset = dataset
     self._cfg = cfg
-    self.patch_size = (cfg.image_shape[0] / cfg.n_patches, cfg.image_shape[1] / cfg.n_patches)
+
+    self.token_embedding_table = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+    self.patch_size = (self._cfg.image_shape[0] / self._cfg.n_patches, self._cfg.image_shape[1] / self._cfg.n_patches)
 
     #Positional embedding
-    self.register_buffer('positional_embeddings', calc_positional_embeddings(1 + cfg.n_patches ** 2 + cfg.n_patches ** 2, cfg.n_embd), persistent=False)
+    self.register_buffer('positional_embeddings', calc_positional_embeddings(1 + self._cfg.n_patches ** 2 + self._cfg.block_size, cfg.n_embd), persistent=False)
     
     self.class_tokens = nn.Parameter(torch.rand(1, cfg.n_embd))
 
-    self.input_d = int(cfg.image_shape[2] * self.patch_size[0] * self.patch_size[1])
+    self.input_d = int(self._cfg.image_shape[2] * self.patch_size[0] * self.patch_size[1])
 
-    self.lin_map = nn.Linear(self.input_d, cfg.n_embd, bias=False) 
+    self.lin_map = nn.Linear(self.input_d, self._cfg.n_embd, bias=False) 
 
     # 4) Transformer encoder blocks
-    self.blocks = nn.ModuleList([Block(cfg.n_embd, cfg.n_head, dropout=self._cfg.dropout) for _ in range(cfg.n_blocks)])
+    self.blocks = nn.ModuleList([Block(self._cfg.n_embd, self._cfg.n_head, dropout=self._cfg.dropout) for _ in range(self._cfg.n_blocks)])
 
-    # 5) Classification MLPk
+    # 5) Classification MLP
     self.mlp = nn.Sequential(
         nn.Linear(cfg.n_embd, cfg.action_bins * cfg.action_dim),
         nn.Softmax(dim=-1)
@@ -166,20 +168,21 @@ class GRP(nn.Module):
               torch.nn.init.zeros_(module.bias)
       elif isinstance(module, nn.Embedding):
           torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-          
-  def forward(self, images, x_goal, targets=None):
+
+  def forward(self, images, goals, targets=None):
     # Dividing images into patches
     n, c, h, w = images.shape
     patches = get_patches_fast(images)
-    patches_goal = get_patches_fast(x_goal)
+    # patches_goal = get_patches_fast(x_goal)
+    goals_e = self.token_embedding_table(goals)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
     out = self.lin_map(patches)
-    out_g = self.lin_map(patches_goal)
+    # out_g = self.lin_map(patches_goal)
     
     # Adding classification and goal_img tokens to the tokens
-    out = torch.cat((self.class_tokens.expand(n, 1, -1), out, out_g), dim=1)
+    out = torch.cat((self.class_tokens.expand(n, 1, -1), out, goals_e), dim=1)
     
     # Adding positional embedding
     out = out + self.positional_embeddings.repeat(n, 1, 1)
@@ -226,33 +229,44 @@ def my_main(cfg: DictConfig):
     dataset_tmp = {
         "img": np.array(dataset["img"]),
         "action": np.concatenate((np.array(dataset["action"]), 
-                                np.array(dataset["rotation_delta"]), 
-                                np.array(dataset["open_gripper"]) + np.random.normal(0.0, 0.001, size = (len(dataset["open_gripper"]), 1))
-        ), axis=1),
+                                np.array(dataset["rotation_delta"]) 
+                                # np.array(dataset["open_gripper"])
+                                ), axis=1),
         "goal_img": np.array(dataset["goal_img"]),
         "goal": dataset["goal"]
     }
-    block_size = shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
+    cfg.block_size = shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
+
+    # here are all the unique characters that occur in this text
+    chars = sorted(list(set([item for row in dataset_tmp["goal"] for item in row]))) ## Flatten to a long string
+    cfg.vocab_size = len(chars)
+    # create a mapping from characters to integers
+    stoi = { ch:i for i,ch in enumerate(chars) }
+    itos = { i:ch for i,ch in enumerate(chars) }
+    encode_txt = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list of integers
+    decode_txy = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
+    print("vocab_size:", cfg.vocab_size)
+    print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 
     import pandas as pd
-    action_labels = [pd.qcut(dataset_tmp["action"][:,i], 
-                             cfg.action_bins, labels=False) for i in range(dataset_tmp["action"].shape[1])] ## Split the classes equally across options, -1 because open/closed gripper is already a bin of 2.
-    # action_labels.append(dataset["open_gripper"]) ## Add gripper closed/open
-    print("bins:", action_labels)
-    # hist, bin_edges = np.histogram(action_labels, density=True, bins=cfg.action_bins)
-    # print("action histogram:", hist)
+    action_labels_and_bins = [pd.qcut(dataset_tmp["action"][:,i], 
+                             cfg.action_bins, labels=False, retbins=True
+                             ) for i in range(dataset_tmp["action"].shape[1])] ## Split the classes equally across options, -1 because open/closed gripper is already a bin of 2.
+    action_labels = [ x[0] for x in action_labels_and_bins]
+    action_bins = [ x[1] for x in action_labels_and_bins] 
+    print("bin edges: ", action_bins)
 
     ## Get the actions and encode them to map to [-1, 1]
     encode_state = lambda af:   ((af/(255.0)*2.0)-1.0).astype(np.float32) # encoder: take a float, output an integer
     resize_state = lambda sf:   cv2.resize(np.array(sf, dtype=np.float32), (cfg.image_shape[0], cfg.image_shape[1]))  # resize state
-    # decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
+    decode_action = lambda binN: action_bins[binN] # Undo mapping to [-1, 1]
 
 
     dataset_tmp = {
         "img": torch.tensor(encode_state(dataset_tmp["img"])).to(device),
-        "action": torch.tensor(np.reshape(action_labels, (dataset_tmp["action"].shape[0], 7)), dtype=torch.uint8).to(device),            
+        "action": torch.tensor(np.reshape(action_labels, (dataset_tmp["action"].shape[0], cfg.action_dim)), dtype=torch.uint8).to(device),            
         "goal_img": torch.tensor(encode_state(dataset_tmp["goal_img"])).to(device),
-        # "goal": torch.tensor([encode_txt(goal[:shortest_goal_txt]) for goal in dataset_tmp["goal"]]).to(device)
+        "goal": torch.tensor([encode_txt(goal[:shortest_goal_txt]) for goal in dataset_tmp["goal"]]).to(device)
     }
 
     print("Dataset shape:", len(dataset_tmp["img"]))
@@ -278,6 +292,15 @@ def my_main(cfg: DictConfig):
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate)
     scheduler = lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=cfg.max_iters)
 
+    import simpler_env
+    from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
+    task_name = "widowx_carrot_on_plate"  # @param ["google_robot_pick_coke_can", "google_robot_move_near", "google_robot_open_drawer", "google_robot_close_drawer", "widowx_spoon_on_towel", "widowx_carrot_on_plate", "widowx_stack_cube", "widowx_put_eggplant_in_basket"]
+    if 'env' in locals():
+        print("Closing existing env")
+        env.close()
+        del env
+    env = simpler_env.make(task_name)
+
     for iter in range(cfg.max_iters):
 
         # every once in a while evaluate the loss on train and val sets
@@ -285,6 +308,36 @@ def my_main(cfg: DictConfig):
             losses = estimate_loss(model)
             print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
             wandb.log({"train loss": losses['train'], "val loss": losses['val']})
+
+            obs, reset_info = env.reset()
+            instruction = env.get_language_instruction()
+            print("Reset info", reset_info)
+            print("Instruction", instruction)
+            frames, rewards = [], []
+            done, truncated = False, False
+            while not (done or truncated):
+                # action[:3]: delta xyz; action[3:6]: delta rotation in axis-angle representation;
+                # action[6:7]: gripper (the meaning of open / close depends on robot URDF)
+                image = get_image_from_maniskill2_obs_dict(env, obs)
+                action, loss = model.forward(torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
+                                       ,torch.tensor(np.array([encode_txt(instruction)])).to(device)
+                                    #    ,torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
+                                       )
+                # action = env.action_space.sample() # replace this with your policy inference
+                action = decode_action(action.cpu().detach().numpy()[0])
+                print("action: ", action)
+                obs, reward, done, truncated, info = env.step(action)
+                frames.append(image)
+                rewards.append(reward)
+            
+            episode_stats = info.get('episode_stats', {})
+            print("Episode stats", episode_stats)
+            print(f"avg reward {np.mean(rewards):.8f}")
+            wandb.log({"avg reward": np.mean(rewards)})
+            import moviepy.editor as mpy
+            clip = mpy.ImageSequenceClip(list(frames), fps=20)
+            clip.write_videofile("./data/sim-env-"+str(0)+".mp4", fps=20)
+            wandb.log({"example": wandb.Video("./data/sim-env-"+str(0)+".mp4")})
 
         # sample a batch of data
         xb, xg, yb = get_batch_vit('train', dataset, cfg.batch_size)

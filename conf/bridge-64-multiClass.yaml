@@ -31,7 +31,7 @@ n_head: 16
 n_blocks: 4
 dropout: 0.2
 action_bins: 10
-action_dim: 7
+action_dim: 6
 
 ## Model hyperparameters
 image_shape: [64, 64, 3]
