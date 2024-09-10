@@ -12,28 +12,26 @@ hydra:
     n_trials: 40
     n_jobs: 2
     params:
-      learning_rate: range(1e-5, 1e-4, step=2e-5)
-      dropout: choice(0.2, 0.3)
-      n_embd: choice(256, 512)
       batch_size: choice(256, 512)
-      action_bins: choice(10, 20)
   
 batch_size: 256 # how many independent sequences will we process in parallel?
 block_size: 32 # what is the maximum context length for predictions?
+vocab_size: 32
 n_patches: 8
 max_iters: 25000
 eval_interval: 100
 learning_rate: 5e-5
 # device = 'cpu'
 eval_iters: 200
-n_embd: 256
+n_embd: 512
 # ------------
 
 r_seed: 1337
 n_head: 16
 n_blocks: 4
-dropout: 0.1
+dropout: 0.2
 action_bins: 10
+action_dim: 7
 
 ## Model hyperparameters
 image_shape: [64, 64, 3]
