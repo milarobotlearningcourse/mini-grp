@@ -1,0 +1,31 @@
+defaults:
+  - _self_
+  - override hydra/launcher: MY_2HRS
+
+
+batch_size: 256 # how many independent sequences will we process in parallel?
+block_size: 0 ## Will be overidden by code
+vocab_size: 0 ## Will be overidden by code
+n_patches: 8
+max_iters: 10000
+eval_interval: 100
+learning_rate: 5e-5
+# device = 'cpu'
+eval_iters: 200
+n_embd: 512
+# ------------
+
+r_seed: 1337
+n_head: 16
+n_blocks: 4
+dropout: 0.2
+action_bins: 10
+action_dim: 7
+
+## Model hyperparameters
+image_shape: [64, 64, 3]
+dataset: gberseth/mini-bridge-mini64pix
+trim: 1000000
+
+# if true, simulate a failure by raising an exception
+error: false

@@ -19,7 +19,7 @@ def get_batch_vit(split, dataset, batch_size):
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
     x = torch.tensor(data["img"][ix], dtype=torch.float)
     x_goal = torch.tensor(data["goal"][ix], dtype=torch.long)
-    y = torch.tensor(data["action"][ix], dtype=torch.long)
+    y = torch.tensor(data["action"][ix], dtype=torch.float)
     # x, y = x.to(device), y.to(device)
     return x, x_goal, y
 
@@ -155,11 +155,9 @@ class GRP(nn.Module):
     # 4) Transformer encoder blocks
     self.blocks = nn.ModuleList([Block(self._cfg.n_embd, self._cfg.n_head, dropout=self._cfg.dropout) for _ in range(self._cfg.n_blocks)])
 
-    # 5) Classification MLP
+    # 5) Classification MLPk
     self.mlp = nn.Sequential(
-        nn.Linear(cfg.n_embd, cfg.action_bins * cfg.action_dim),
-        # nn.LayerNorm(cfg.action_bins * cfg.action_dim),
-        nn.Dropout(self._cfg.dropout),
+        nn.Linear(self._cfg.n_embd, self._cfg.action_bins),
         nn.Softmax(dim=-1)
     )
 
@@ -197,23 +195,22 @@ class GRP(nn.Module):
 
     # Getting the classification token only
     out = out[:, 0]
-    logits = self.mlp(out)
+    out = self.mlp(out)
         
     if targets is None:
         loss = None
     else:
         # B,T,C = 4,8,2 # batch, time, channels
-        B, C = targets.shape
-        # targets.view(B, 7)
-        logits = logits.view(B, self._cfg.action_bins, C)
-        # targets = targets.view(B, C)
-        loss = F.cross_entropy(logits, targets)
-    return (logits, loss)
+        B, C = out.shape
+        # logits = logits.view(B*T, C)
+        # targets = targets.view(B)
+        loss = F.mse_loss(out, targets) ## B, C
+    return (out, loss)
 
 import hydra, json
 from omegaconf import DictConfig, OmegaConf
 
-@hydra.main(config_path="conf", config_name="bridge-64-multiClass")
+@hydra.main(config_path="conf", config_name="bridge-64-submitit")
 def my_main(cfg: DictConfig):
     torch.manual_seed(cfg.r_seed)
     print ("cfg:", OmegaConf.to_yaml(cfg))
@@ -230,9 +227,9 @@ def my_main(cfg: DictConfig):
 
     dataset_tmp = {
         "img": np.array(dataset["img"]),
-        "action": np.concatenate((np.array(dataset["action"]), 
-                                np.array(dataset["rotation_delta"]) 
-                                # np.array(dataset["open_gripper"])
+        "action": np.concatenate((np.array(dataset["action"]) 
+                                ,np.array(dataset["rotation_delta"])
+                                # .np.array(dataset["open_gripper"])
                                 ), axis=1),
         "goal_img": np.array(dataset["goal_img"]),
         "goal": dataset["goal"]
@@ -250,13 +247,9 @@ def my_main(cfg: DictConfig):
     print("vocab_size:", cfg.vocab_size)
     print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 
-    import pandas as pd
-    action_labels_and_bins = [pd.qcut(dataset_tmp["action"][:,i], 
-                             cfg.action_bins, labels=False, retbins=True
-                             ) for i in range(dataset_tmp["action"].shape[1])] ## Split the classes equally across options, -1 because open/closed gripper is already a bin of 2.
-    action_labels = [ x[0] for x in action_labels_and_bins]
-    action_bins = [ x[1] for x in action_labels_and_bins] 
-    print("bin edges: ", action_bins)
+    a_std, a_mean = (dataset_tmp["action"].std(axis=0) + 0.001) * 1.5, dataset_tmp["action"].mean(axis=0)
+    cfg.action_bins = len(a_mean)
+    encode_action = lambda af:   (((af - a_mean)/(a_std))).astype(np.float32) # encoder: take a float, output an integer
 
     ## Get the actions and encode them to map to [-1, 1]
     encode_state = lambda af:   ((af/(255.0)*2.0)-1.0).astype(np.float32) # encoder: take a float, output an integer
@@ -266,7 +259,7 @@ def my_main(cfg: DictConfig):
 
     dataset_tmp = {
         "img": torch.tensor(encode_state(dataset_tmp["img"])).to(device),
-        "action": torch.tensor(np.reshape(action_labels, (dataset_tmp["action"].shape[0], cfg.action_dim)), dtype=torch.uint8).to(device),            
+        "action": torch.tensor(encode_action(dataset_tmp["action"]), dtype=torch.float).to(device),            
         "goal_img": torch.tensor(encode_state(dataset_tmp["goal_img"])).to(device),
         "goal": torch.tensor([encode_txt(goal[:shortest_goal_txt]) for goal in dataset_tmp["goal"]]).to(device)
     }
@@ -278,7 +271,7 @@ def my_main(cfg: DictConfig):
     # start a new wandb run to track this script
     wandb.init(
         # set the wandb project where this run will be logged
-        project="mini-grp",
+        project="mini-grp-continuous",
 
         # track hyperparameters and run metadata
         config= OmegaConf.to_container(cfg)
@@ -316,6 +309,5 @@ def my_main(cfg: DictConfig):
     return losses['val']
 
 if __name__ == "__main__":
-    import os
     results = my_main()
     print("results:", results)

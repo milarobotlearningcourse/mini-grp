@@ -12,6 +12,7 @@ conda activate roble
 conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia 
 
 pip install torch==2.4.0
+pip install hydra-submitit-launcher --upgrade
 
 ### Install MilaTools
 

@@ -14,3 +14,4 @@ Pillow==9.4.0
 wandb
 hydra-core==1.1.1
 hydra-optuna-sweeper
+hydra-submitit-launcher
