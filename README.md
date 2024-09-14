@@ -55,7 +55,7 @@ cd {this_repo}
 pip install -e .
 ```
 
-conda install vulkan-tools vulkan-headers
+conda install conda-forge::vulkan-tools conda-forge::vulkan-headers
 
 
 ### License
