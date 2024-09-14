@@ -173,21 +173,17 @@ class GRP(nn.Module):
     # Dividing images into patches
     n, c, h, w = images.shape
     patches = get_patches_fast(images)
-    # patches_goal = get_patches_fast(x_goal)
     goals_e = self.token_embedding_table(goals)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
     out = self.lin_map(patches)
-    # out_g = self.lin_map(patches_goal)
     
     # Adding classification and goal_img tokens to the tokens
     out = torch.cat((self.class_tokens.expand(n, 1, -1), out, goals_e), dim=1)
     
     # Adding positional embedding
     out = out + self.positional_embeddings.repeat(n, 1, 1)
-    # pos_emb = self.position_embedding_table(torch.arange(n_patches ** 2 + 1, device=device)) # (T,C)
-    # out = out + pos_emb
     
     # Transformer Blocks
     for block in self.blocks:
@@ -200,10 +196,7 @@ class GRP(nn.Module):
     if targets is None:
         loss = None
     else:
-        # B,T,C = 4,8,2 # batch, time, channels
         B, C = out.shape
-        # logits = logits.view(B*T, C)
-        # targets = targets.view(B)
         loss = F.mse_loss(out, targets) ## B, C
     return (out, loss)
 
@@ -256,7 +249,6 @@ def my_main(cfg: DictConfig):
     resize_state = lambda sf:   cv2.resize(np.array(sf, dtype=np.float32), (cfg.image_shape[0], cfg.image_shape[1]))  # resize state
     # decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
 
-
     dataset_tmp = {
         "img": torch.tensor(encode_state(dataset_tmp["img"])).to(device),
         "action": torch.tensor(encode_action(dataset_tmp["action"]), dtype=torch.float).to(device),            
@@ -265,7 +257,7 @@ def my_main(cfg: DictConfig):
     }
 
     print("Dataset shape:", len(dataset_tmp["img"]))
-    dataset = {"train": dataset_tmp, "test": dataset_tmp} 
+    dataset_tmp = {"train": dataset_tmp, "test": dataset_tmp} 
     # print ("Results:", results)
     import wandb
     # start a new wandb run to track this script
@@ -277,7 +269,7 @@ def my_main(cfg: DictConfig):
         config= OmegaConf.to_container(cfg)
     )
     wandb.run.log_code(".")
-    model = GRP(dataset, cfg)
+    model = GRP(dataset_tmp, cfg)
     m = model.to(device)
     # print the number of parameters in the model
     print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
@@ -294,7 +286,7 @@ def my_main(cfg: DictConfig):
             wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
         # sample a batch of data
-        xb, xg, yb = get_batch_vit('train', dataset, cfg.batch_size)
+        xb, xg, yb = get_batch_vit('train', dataset_tmp, cfg.batch_size)
 
         # evaluate the loss
         logits, loss = model(xb, xg, yb)

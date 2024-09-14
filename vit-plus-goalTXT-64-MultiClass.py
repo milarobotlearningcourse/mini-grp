@@ -158,8 +158,8 @@ class GRP(nn.Module):
     # 5) Classification MLP
     self.mlp = nn.Sequential(
         nn.Linear(cfg.n_embd, cfg.action_bins * cfg.action_dim),
-        # nn.LayerNorm(cfg.action_bins * cfg.action_dim),
-        nn.Dropout(self._cfg.dropout),
+        nn.LayerNorm(cfg.action_bins * cfg.action_dim),
+        # nn.Dropout(self._cfg.dropout),
         nn.Softmax(dim=-1)
     )
 
@@ -175,21 +175,16 @@ class GRP(nn.Module):
     # Dividing images into patches
     n, c, h, w = images.shape
     patches = get_patches_fast(images)
-    # patches_goal = get_patches_fast(x_goal)
     goals_e = self.token_embedding_table(goals)
-    
-    # Running linear layer tokenization
+
     # Map the vector corresponding to each patch to the hidden size dimension
     out = self.lin_map(patches)
-    # out_g = self.lin_map(patches_goal)
     
     # Adding classification and goal_img tokens to the tokens
     out = torch.cat((self.class_tokens.expand(n, 1, -1), out, goals_e), dim=1)
     
     # Adding positional embedding
     out = out + self.positional_embeddings.repeat(n, 1, 1)
-    # pos_emb = self.position_embedding_table(torch.arange(n_patches ** 2 + 1, device=device)) # (T,C)
-    # out = out + pos_emb
     
     # Transformer Blocks
     for block in self.blocks:
@@ -202,11 +197,8 @@ class GRP(nn.Module):
     if targets is None:
         loss = None
     else:
-        # B,T,C = 4,8,2 # batch, time, channels
         B, C = targets.shape
-        # targets.view(B, 7)
         logits = logits.view(B, self._cfg.action_bins, C)
-        # targets = targets.view(B, C)
         loss = F.cross_entropy(logits, targets)
     return (logits, loss)
 
@@ -228,7 +220,7 @@ def my_main(cfg: DictConfig):
     ## dataset = load_from_disk("datasets/mini-bridge.hf")
     print('Features:', dataset.features)
 
-    dataset_tmp = {
+    dataset = {
         "img": np.array(dataset["img"]),
         "action": np.concatenate((np.array(dataset["action"]), 
                                 np.array(dataset["rotation_delta"]) 
@@ -240,7 +232,7 @@ def my_main(cfg: DictConfig):
     cfg.block_size = shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
 
     # here are all the unique characters that occur in this text
-    chars = sorted(list(set([item for row in dataset_tmp["goal"] for item in row]))) ## Flatten to a long string
+    chars = sorted(list(set([item for row in dataset["goal"] for item in row]))) ## Flatten to a long string
     cfg.vocab_size = len(chars)
     # create a mapping from characters to integers
     stoi = { ch:i for i,ch in enumerate(chars) }
@@ -248,12 +240,12 @@ def my_main(cfg: DictConfig):
     encode_txt = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list of integers
     decode_txy = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
     print("vocab_size:", cfg.vocab_size)
-    print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
+    print("example text encode:", encode_txt(dataset["goal"][0]))
 
     import pandas as pd
-    action_labels_and_bins = [pd.qcut(dataset_tmp["action"][:,i], 
+    action_labels_and_bins = [pd.qcut(dataset["action"][:,i], 
                              cfg.action_bins, labels=False, retbins=True
-                             ) for i in range(dataset_tmp["action"].shape[1])] ## Split the classes equally across options, -1 because open/closed gripper is already a bin of 2.
+                             ) for i in range(dataset["action"].shape[1])] ## Split the classes equally across options, -1 because open/closed gripper is already a bin of 2.
     action_labels = [ x[0] for x in action_labels_and_bins]
     action_bins = [ x[1] for x in action_labels_and_bins] 
     print("bin edges: ", action_bins)
@@ -265,10 +257,10 @@ def my_main(cfg: DictConfig):
 
 
     dataset_tmp = {
-        "img": torch.tensor(encode_state(dataset_tmp["img"])).to(device),
-        "action": torch.tensor(np.reshape(action_labels, (dataset_tmp["action"].shape[0], cfg.action_dim)), dtype=torch.uint8).to(device),            
-        "goal_img": torch.tensor(encode_state(dataset_tmp["goal_img"])).to(device),
-        "goal": torch.tensor([encode_txt(goal[:shortest_goal_txt]) for goal in dataset_tmp["goal"]]).to(device)
+        "img": torch.tensor(encode_state(dataset["img"])).to(device),
+        "action": torch.tensor(np.reshape(action_labels, (dataset["action"].shape[0], cfg.action_dim)), dtype=torch.uint8).to(device),            
+        "goal_img": torch.tensor(encode_state(dataset["goal_img"])).to(device),
+        "goal": torch.tensor([encode_txt(goal[:shortest_goal_txt]) for goal in dataset["goal"]]).to(device)
     }
 
     print("Dataset shape:", len(dataset_tmp["img"]))
