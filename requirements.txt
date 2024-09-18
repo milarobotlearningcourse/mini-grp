@@ -3,6 +3,8 @@ matplotlib
 rlds 
 dm-reverb 
 mediapy
+numpy==1.26.4
+pandas==2.2.1
 opencv-python ## for cv2
 tensorflow==2.15.0
 tensorflow_datasets==4.9.2
@@ -11,6 +13,7 @@ einops==0.8.0
 huggingface
 datasets
 Pillow==9.4.0
+rlds
 wandb
 hydra-core==1.1.1
 hydra-optuna-sweeper
