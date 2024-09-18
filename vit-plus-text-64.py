@@ -39,7 +39,6 @@ dataset = load_dataset("gberseth/" + name, split='train')
 ## dataset = load_from_disk("datasets/mini-bridge.hf")
 print('Features:', dataset.features)
 
-
 dataset_tmp = {
     "img": np.array(dataset["img"]),
     "action": np.concatenate((np.array(dataset["action"]), 
