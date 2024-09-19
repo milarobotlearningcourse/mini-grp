@@ -203,7 +203,7 @@ class GRP(nn.Module):
 import hydra, json
 from omegaconf import DictConfig, OmegaConf
 
-@hydra.main(config_path="conf", config_name="bridge-64-submitit")
+@hydra.main(config_path="conf", config_name="bridge-64-light")
 def my_main(cfg: DictConfig):
     torch.manual_seed(cfg.r_seed)
     print ("cfg:", OmegaConf.to_yaml(cfg))
@@ -227,7 +227,8 @@ def my_main(cfg: DictConfig):
         "goal_img": np.array(dataset["goal_img"]),
         "goal": dataset["goal"]
     }
-    cfg.block_size = shortest_goal_txt = min([len(txt) for txt in dataset["goal"]])
+    shortest_text_len = min([len(txt) for txt in dataset["goal"]])
+    cfg.block_size = shortest_text_len
 
     # here are all the unique characters that occur in this text
     chars = sorted(list(set([item for row in dataset_tmp["goal"] for item in row]))) ## Flatten to a long string
@@ -247,13 +248,13 @@ def my_main(cfg: DictConfig):
     ## Get the actions and encode them to map to [-1, 1]
     encode_state = lambda af:   ((af/(255.0)*2.0)-1.0).astype(np.float32) # encoder: take a float, output an integer
     resize_state = lambda sf:   cv2.resize(np.array(sf, dtype=np.float32), (cfg.image_shape[0], cfg.image_shape[1]))  # resize state
-    # decode_action = lambda binN: (binN * a_std ) + a_mean  # Undo mapping to [-1, 1]
+    decode_action = lambda binN: (binN * a_std) + a_mean  # Undo mapping to [-1, 1]
 
     dataset_tmp = {
         "img": torch.tensor(encode_state(dataset_tmp["img"])).to(device),
         "action": torch.tensor(encode_action(dataset_tmp["action"]), dtype=torch.float).to(device),            
         "goal_img": torch.tensor(encode_state(dataset_tmp["goal_img"])).to(device),
-        "goal": torch.tensor([encode_txt(goal[:shortest_goal_txt]) for goal in dataset_tmp["goal"]]).to(device)
+        "goal": torch.tensor([encode_txt(goal[:cfg.block_size]) for goal in dataset_tmp["goal"]]).to(device)
     }
 
     print("Dataset shape:", len(dataset_tmp["img"]))
@@ -305,12 +306,12 @@ def my_main(cfg: DictConfig):
                 # action[6:7]: gripper (the meaning of open / close depends on robot URDF)
                 image = get_image_from_maniskill2_obs_dict(env, obs)
                 action, loss = model.forward(torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
-                                       ,torch.tensor(np.array([encode_txt(instruction)])).to(device)
+                                       ,torch.tensor(np.array([encode_txt(instruction)[:cfg.block_size]])).to(device)
                                     #    ,torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
                                        )
                 # action = env.action_space.sample() # replace this with your policy inference
-                action = decode_action(action.cpu().detach().numpy()[0])
-                print("action: ", action)
+                action = np.concatenate((decode_action(action.cpu().detach().numpy()[0]), [0]), axis = -1) ## Add in the gripper close action
+                # print("action: ", action)
                 obs, reward, done, truncated, info = env.step(action)
                 frames.append(image)
                 rewards.append(reward)
@@ -322,7 +323,7 @@ def my_main(cfg: DictConfig):
             import moviepy.editor as mpy
             clip = mpy.ImageSequenceClip(list(frames), fps=20)
             clip.write_videofile("./data/sim-env-"+str(0)+".mp4", fps=20)
-            wandb.log({"example": wandb.Video("./data/sim-env-"+str(0)+".mp4")})
+            # wandb.log({"example": wandb.Video("./data/sim-env-"+str(0)+".mp4")})
 
         # sample a batch of data
         xb, xg, yb = get_batch_vit('train', dataset_tmp, cfg.batch_size)
