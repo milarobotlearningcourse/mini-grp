@@ -73,13 +73,16 @@ class Head(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x, maks=None):
         B,T,C = x.shape
+        if mask == None:
+            mask = torch.ones((T, ), device=device) ## (1, T)
         k = self.key(x)   # (B,T,C)
         q = self.query(x) # (B,T,C)
         # compute attention scores ("affinities")
         wei = q @ k.transpose(-2,-1) * C**-0.5 # (B, T, C) @ (B, C, T) -> (B, T, T)
-        # wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # (B, T, T) ## Remove masking
+        ### Block masked attention
+        wei = wei.masked_fill(mask == 0, float('-inf')) # (B, T, T)
         wei = F.softmax(wei, dim=-1) # (B, T, T)
         wei = self.dropout(wei)
         # perform the weighted aggregation of the values
@@ -96,8 +99,8 @@ class MultiHeadAttention(nn.Module):
         self.proj = nn.Linear(n_embd, n_embd)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
-        out = torch.cat([h(x) for h in self.heads], dim=-1)
+    def forward(self, x, mask=None):
+        out = torch.cat([h(x, mask) for h in self.heads], dim=-1)
         out = self.dropout(self.proj(out))
         return out
 
@@ -114,7 +117,7 @@ class FeedFoward(nn.Module):
         )
 
     def forward(self, x):
-        return self.net(x)
+        return self.net(x,)
 
 class Block(nn.Module):
     """ Transformer block: communication followed by computation """
@@ -128,8 +131,8 @@ class Block(nn.Module):
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
 
-    def forward(self, x):
-        x = x + self.sa(self.ln1(x))
+    def forward(self, x, mask=None):
+        x = x + self.sa(self.ln1(x), mask)
         x = x + self.ffwd(self.ln2(x))
         return x
 
@@ -183,10 +186,18 @@ class GRP(nn.Module):
     
     # Adding positional embedding
     out = out + self.positional_embeddings.repeat(n, 1, 1)
-    
-    # Transformer Blocks
+
+    ## Compute blocked masks
+    mask = torch.ones((T + c + c + 1, ), device=device) ## (1, T)
+    # if targets is None:
+    #     pass
+    # elif (torch.rand(1)[0] > 0.66):  
+    #     mask[0:T] = torch.zeros((1,T), device=device) ## Mask goal string
+    # elif (torch.rand(1)[0] > 0.33):
+    #     mask[block_size:block_size+c] = torch.zeros((1,c), device=device) ## Mask goal image
+    # # Transformer Blocks
     for block in self.blocks:
-        out = block(out)
+        out = block(out, mask)
 
     # Getting the classification token only
     out = out[:, 0]
