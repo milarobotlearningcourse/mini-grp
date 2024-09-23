@@ -18,9 +18,10 @@ def get_batch_vit(split, dataset, batch_size):
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
     x = torch.tensor(data["img"][ix], dtype=torch.float)
     x_goal = torch.tensor(data["goal"][ix], dtype=torch.long)
+    x_goal_img = torch.tensor(data["goal_img"][ix], dtype=torch.long)
     y = torch.tensor(data["action"][ix], dtype=torch.float)
     # x, y = x.to(device), y.to(device)
-    return x, x_goal, y
+    return x, x_goal, x_goal_img, y
 
 def calc_positional_embeddings(sequence_length, d):
     result = torch.ones(sequence_length, d)
@@ -36,8 +37,8 @@ def estimate_loss(model):
     for split in ['train', 'val']:
         losses = torch.zeros(model._cfg.eval_iters)
         for k in range(model._cfg.eval_iters):
-            X, x_goal, Y = get_batch_vit(split, model._dataset, model._cfg.batch_size)
-            logits, loss = model(X, x_goal, Y)
+            X, x_goal, x_goal_img, Y = get_batch_vit(split, model._dataset, model._cfg.batch_size)
+            logits, loss = model(X, x_goal, x_goal_img, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -146,7 +147,7 @@ class GRP(nn.Module):
     self.patch_size = (self._cfg.image_shape[0] / self._cfg.n_patches, self._cfg.image_shape[1] / self._cfg.n_patches)
 
     #Positional embedding
-    self.register_buffer('positional_embeddings', calc_positional_embeddings(1 + self._cfg.n_patches ** 2 + self._cfg.block_size, cfg.n_embd), persistent=False)
+    self.register_buffer('positional_embeddings', calc_positional_embeddings(1 + self._cfg.n_patches ** 2 + self._cfg.block_size + self._cfg.n_patches ** 2, cfg.n_embd), persistent=False)
     
     self.class_tokens = nn.Parameter(torch.rand(1, cfg.n_embd))
 
@@ -160,7 +161,7 @@ class GRP(nn.Module):
     # 5) Classification MLPk
     self.mlp = nn.Sequential(
         nn.Linear(self._cfg.n_embd, self._cfg.action_bins),
-        nn.Softmax(dim=-1)
+        # nn.Softmax(dim=-1)
     )
 
   def _init_weights(self, module):
@@ -174,28 +175,32 @@ class GRP(nn.Module):
   def forward(self, images, goals, targets=None):
     # Dividing images into patches
     n, c, h, w = images.shape
+    B, T = goals.shape
     patches = get_patches_fast(images)
+    patches_g = get_patches_fast(images)
     goals_e = self.token_embedding_table(goals)
     
     # Running linear layer tokenization
     # Map the vector corresponding to each patch to the hidden size dimension
     out = self.lin_map(patches)
+    out_g = self.lin_map(patches_g)
     
     # Adding classification and goal_img tokens to the tokens
-    out = torch.cat((self.class_tokens.expand(n, 1, -1), out, goals_e), dim=1)
+    out = torch.cat((self.class_tokens.expand(n, 1, -1), out, goals_e, out_g), dim=1)
     
     # Adding positional embedding
     out = out + self.positional_embeddings.repeat(n, 1, 1)
 
     ## Compute blocked masks
-    mask = torch.ones((T + c + c + 1, ), device=device) ## (1, T)
-    # if targets is None:
-    #     pass
-    # elif (torch.rand(1)[0] > 0.66):  
-    #     mask[0:T] = torch.zeros((1,T), device=device) ## Mask goal string
-    # elif (torch.rand(1)[0] > 0.33):
-    #     mask[block_size:block_size+c] = torch.zeros((1,c), device=device) ## Mask goal image
-    # # Transformer Blocks
+    mask = torch.ones((1 + c + T + c, ), device=device) ## (1, T)
+    if targets is None:
+        pass
+    elif (torch.rand(1)[0] > 0.66):  
+        mask[1 + c: 1 + c+ T] = torch.zeros((1,T), device=device) ## Mask goal string
+    elif (torch.rand(1)[0] > 0.33):
+        mask[1 + c + T: 1 + c + T + c] = torch.zeros((1,c), device=device) ## Mask goal image
+        
+    # Transformer Blocks
     for block in self.blocks:
         out = block(out, mask)
 
