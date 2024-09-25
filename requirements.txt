@@ -15,7 +15,7 @@ datasets
 Pillow==9.4.0
 rlds
 wandb
-torch==2.4.0
+torch==2.4.1
 hydra-core==1.1.1
 hydra-optuna-sweeper
 hydra-submitit-launcher
