@@ -23,9 +23,10 @@ n_patches: 8
 max_iters: 10000
 eval_interval: 100
 learning_rate: 5e-5
-# device = 'cpu'
 eval_iters: 200
 n_embd: 64
+device: "cpu"
+testing: true
 # ------------
 
 r_seed: 1337
@@ -37,7 +38,7 @@ action_dim: 7
 
 ## Model hyperparameters
 image_shape: [64, 64, 3]
-dataset: gberseth/mini-bridge-mini64pix
+dataset: gberseth/mini-bridge-mini64px
 trim: 1000000
 
 # if true, simulate a failure by raising an exception

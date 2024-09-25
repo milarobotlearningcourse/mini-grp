@@ -23,9 +23,10 @@ n_patches: 8
 max_iters: 10000
 eval_interval: 100
 learning_rate: 5e-5
-# device = 'cpu'
 eval_iters: 200
 n_embd: 512
+device: "cpu"
+testing: false
 # ------------
 
 r_seed: 1337

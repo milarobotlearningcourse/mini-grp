@@ -18,7 +18,7 @@ def get_batch_vit(split, dataset, batch_size):
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
     x = torch.tensor(data["img"][ix], dtype=torch.float)
     x_goal = torch.tensor(data["goal"][ix], dtype=torch.long)
-    x_goal_img = torch.tensor(data["goal_img"][ix], dtype=torch.long)
+    x_goal_img = torch.tensor(data["goal_img"][ix], dtype=torch.float)
     y = torch.tensor(data["action"][ix], dtype=torch.float)
     # x, y = x.to(device), y.to(device)
     return x, x_goal, x_goal_img, y
@@ -74,10 +74,10 @@ class Head(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, maks=None):
+    def forward(self, x, mask=None):
         B,T,C = x.shape
         if mask == None:
-            mask = torch.ones((T, ), device=device) ## (1, T)
+            mask = torch.ones((T, ), device=self.device) ## (1, T)
         k = self.key(x)   # (B,T,C)
         q = self.query(x) # (B,T,C)
         # compute attention scores ("affinities")
@@ -172,12 +172,12 @@ class GRP(nn.Module):
       elif isinstance(module, nn.Embedding):
           torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-  def forward(self, images, goals, targets=None):
+  def forward(self, images, goals, goal_imgs, targets=None):
     # Dividing images into patches
     n, c, h, w = images.shape
     B, T = goals.shape
     patches = get_patches_fast(images)
-    patches_g = get_patches_fast(images)
+    patches_g = get_patches_fast(goal_imgs)
     goals_e = self.token_embedding_table(goals)
     
     # Running linear layer tokenization
@@ -192,13 +192,13 @@ class GRP(nn.Module):
     out = out + self.positional_embeddings.repeat(n, 1, 1)
 
     ## Compute blocked masks
-    mask = torch.ones((1 + c + T + c, ), device=device) ## (1, T)
+    mask = torch.ones((1 + c + T + c, ), device=self._cfg.device) ## (1, T)
     if targets is None:
         pass
     elif (torch.rand(1)[0] > 0.66):  
-        mask[1 + c: 1 + c+ T] = torch.zeros((1,T), device=device) ## Mask goal string
+        mask[1 + c: 1 + c+ T] = torch.zeros((1,T), device=self._cfg.device) ## Mask goal string
     elif (torch.rand(1)[0] > 0.33):
-        mask[1 + c + T: 1 + c + T + c] = torch.zeros((1,c), device=device) ## Mask goal image
+        mask[1 + c + T: 1 + c + T + c] = torch.zeros((1,c), device=self._cfg.device) ## Mask goal image
         
     # Transformer Blocks
     for block in self.blocks:
@@ -226,7 +226,7 @@ def my_main(cfg: DictConfig):
     print (OmegaConf.to_container(cfg))
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
-
+    cfg.device = device
     from datasets import load_dataset, load_from_disk
 
     dataset = load_dataset(cfg.dataset, split='train')
@@ -275,16 +275,17 @@ def my_main(cfg: DictConfig):
     print("Dataset shape:", len(dataset_tmp["img"]))
     dataset_tmp = {"train": dataset_tmp, "test": dataset_tmp} 
     # print ("Results:", results)
-    import wandb
-    # start a new wandb run to track this script
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project="mini-grp-continuous",
+    if not cfg.testing:
+        import wandb
+        # start a new wandb run to track this script
+        wandb.init(
+            # set the wandb project where this run will be logged
+            project="mini-grp-continuous",
 
-        # track hyperparameters and run metadata
-        config= OmegaConf.to_container(cfg)
-    )
-    wandb.run.log_code(".")
+            # track hyperparameters and run metadata
+            config= OmegaConf.to_container(cfg)
+        )
+        wandb.run.log_code(".")
     model = GRP(dataset_tmp, cfg)
     m = model.to(device)
     # print the number of parameters in the model
@@ -293,14 +294,14 @@ def my_main(cfg: DictConfig):
     # create a PyTorch optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate)
 
-    import simpler_env
-    from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
-    task_name = "widowx_carrot_on_plate"  # @param ["google_robot_pick_coke_can", "google_robot_move_near", "google_robot_open_drawer", "google_robot_close_drawer", "widowx_spoon_on_towel", "widowx_carrot_on_plate", "widowx_stack_cube", "widowx_put_eggplant_in_basket"]
-    if 'env' in locals():
-        print("Closing existing env")
-        env.close()
-        del env
-    env = simpler_env.make(task_name)
+    # import simpler_env
+    # from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
+    # task_name = "widowx_carrot_on_plate"  # @param ["google_robot_pick_coke_can", "google_robot_move_near", "google_robot_open_drawer", "google_robot_close_drawer", "widowx_spoon_on_towel", "widowx_carrot_on_plate", "widowx_stack_cube", "widowx_put_eggplant_in_basket"]
+    # if 'env' in locals():
+    #     print("Closing existing env")
+    #     env.close()
+    #     del env
+    # env = simpler_env.make(task_name)
 
     for iter in range(cfg.max_iters):
 
@@ -308,43 +309,44 @@ def my_main(cfg: DictConfig):
         if iter % cfg.eval_interval == 0 or iter == cfg.max_iters - 1:
             losses = estimate_loss(model)
             print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-            wandb.log({"train loss": losses['train'], "val loss": losses['val']})
+            if not cfg.testing:
+                wandb.log({"train loss": losses['train'], "val loss": losses['val']})
 
-            obs, reset_info = env.reset()
-            instruction = env.get_language_instruction()
-            print("Reset info", reset_info)
-            print("Instruction", instruction)
-            frames, rewards = [], []
-            done, truncated = False, False
-            while not (done or truncated):
-                # action[:3]: delta xyz; action[3:6]: delta rotation in axis-angle representation;
-                # action[6:7]: gripper (the meaning of open / close depends on robot URDF)
-                image = get_image_from_maniskill2_obs_dict(env, obs)
-                action, loss = model.forward(torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
-                                       ,torch.tensor(np.array([encode_txt(instruction)[:cfg.block_size]])).to(device)
-                                    #    ,torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
-                                       )
-                # action = env.action_space.sample() # replace this with your policy inference
-                action = np.concatenate((decode_action(action.cpu().detach().numpy()[0]), [0]), axis = -1) ## Add in the gripper close action
-                # print("action: ", action)
-                obs, reward, done, truncated, info = env.step(action)
-                frames.append(image)
-                rewards.append(reward)
+            # obs, reset_info = env.reset()
+            # instruction = env.get_language_instruction()
+            # print("Reset info", reset_info)
+            # print("Instruction", instruction)
+            # frames, rewards = [], []
+            # done, truncated = False, False
+            # while not (done or truncated):
+            #     # action[:3]: delta xyz; action[3:6]: delta rotation in axis-angle representation;
+            #     # action[6:7]: gripper (the meaning of open / close depends on robot URDF)
+            #     image = get_image_from_maniskill2_obs_dict(env, obs)
+            #     action, loss = model.forward(torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
+            #                            ,torch.tensor(np.array([encode_txt(instruction)[:cfg.block_size]])).to(device)
+            #                         #    ,torch.tensor(np.array([encode_state(resize_state(image))])).to(device)
+            #                            )
+            #     # action = env.action_space.sample() # replace this with your policy inference
+            #     action = np.concatenate((decode_action(action.cpu().detach().numpy()[0]), [0]), axis = -1) ## Add in the gripper close action
+            #     # print("action: ", action)
+            #     obs, reward, done, truncated, info = env.step(action)
+            #     frames.append(image)
+            #     rewards.append(reward)
             
-            episode_stats = info.get('episode_stats', {})
-            print("Episode stats", episode_stats)
-            print(f"avg reward {np.mean(rewards):.8f}")
-            wandb.log({"avg reward": np.mean(rewards)})
-            import moviepy.editor as mpy
-            clip = mpy.ImageSequenceClip(list(frames), fps=20)
-            clip.write_videofile("./data/sim-env-"+str(0)+".mp4", fps=20)
+            # episode_stats = info.get('episode_stats', {})
+            # print("Episode stats", episode_stats)
+            # print(f"avg reward {np.mean(rewards):.8f}")
+            # wandb.log({"avg reward": np.mean(rewards)})
+            # import moviepy.editor as mpy
+            # clip = mpy.ImageSequenceClip(list(frames), fps=20)
+            # clip.write_videofile("./data/sim-env-"+str(0)+".mp4", fps=20)
             # wandb.log({"example": wandb.Video("./data/sim-env-"+str(0)+".mp4")})
 
         # sample a batch of data
-        xb, xg, yb = get_batch_vit('train', dataset_tmp, cfg.batch_size)
+        xb, xg, xgi, yb = get_batch_vit('train', dataset_tmp, cfg.batch_size)
 
         # evaluate the loss
-        logits, loss = model(xb, xg, yb)
+        logits, loss = model(xb, xg, xgi, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
@@ -352,7 +354,8 @@ def my_main(cfg: DictConfig):
     # generate from the model
     context = torch.zeros((1, 1), dtype=torch.long, device=device)
     # print(decode(m.generate(context, max_new_tokens=2000)[0].tolist()))
-    wandb.finish()
+    if not cfg.testing:
+        wandb.finish()
     return losses['val']
 
 if __name__ == "__main__":
