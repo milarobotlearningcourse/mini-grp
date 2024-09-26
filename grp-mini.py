@@ -12,7 +12,7 @@ import cv2
 
 
 # data loading
-def get_batch_vit(split, dataset, batch_size):
+def get_batch_grp(split, dataset, batch_size):
     # generate a small batch of inputs x and targets y
     data = dataset['train'] if split == 'train' else dataset['test']
     ix = np.random.randint(int(len(data["img"])), size=(batch_size,))
@@ -23,12 +23,6 @@ def get_batch_vit(split, dataset, batch_size):
     # x, y = x.to(device), y.to(device)
     return x, x_goal, x_goal_img, y
 
-def calc_positional_embeddings(sequence_length, d):
-    result = torch.ones(sequence_length, d)
-    for i in range(sequence_length):
-        for j in range(d):
-            result[i][j] = np.sin(i / (10000 ** (j / d))) if j % 2 == 0 else np.cos(i / (10000 ** ((j - 1) / d)))
-    return result
 
 @torch.no_grad()
 def estimate_loss(model):
@@ -37,7 +31,7 @@ def estimate_loss(model):
     for split in ['train', 'val']:
         losses = torch.zeros(model._cfg.eval_iters)
         for k in range(model._cfg.eval_iters):
-            X, x_goal, x_goal_img, Y = get_batch_vit(split, model._dataset, model._cfg.batch_size)
+            X, x_goal, x_goal_img, Y = get_batch_grp(split, model._dataset, model._cfg.batch_size)
             logits, loss = model(X, x_goal, x_goal_img, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
@@ -343,7 +337,7 @@ def my_main(cfg: DictConfig):
             # wandb.log({"example": wandb.Video("./data/sim-env-"+str(0)+".mp4")})
 
         # sample a batch of data
-        xb, xg, xgi, yb = get_batch_vit('train', dataset_tmp, cfg.batch_size)
+        xb, xg, xgi, yb = get_batch_grp('train', dataset_tmp, cfg.batch_size)
 
         # evaluate the loss
         logits, loss = model(xb, xg, xgi, yb)
