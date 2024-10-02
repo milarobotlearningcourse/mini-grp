@@ -13,6 +13,7 @@ hydra:
     n_jobs: 2
     params:
       batch_size: choice(256, 512)
+      n_embd: choice(256, 512)
   
 batch_size: 256 # how many independent sequences will we process in parallel?
 block_size: 32 # what is the maximum context length for predictions?
