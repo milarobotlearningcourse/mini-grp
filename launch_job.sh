@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-gpu=4
+#SBATCH --gres=gpu:a100
+#SBATCH --cpus-per-gpu=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=32G
 #SBATCH --time=23:59:00
@@ -29,7 +29,7 @@ conda activate roble
 unset CUDA_VISIBLE_DEVICES
  
 # Execute Python script
-python vit-plus-goalTXT-64-MultiClass.py --multirun
+python grp-mini.py --multirun
 # Call main.py with all arguments passed to this script.
 # This allows you to call the script many times with different arguments.
 # Quotes around $@ prevent splitting of arguments that contain spaces.

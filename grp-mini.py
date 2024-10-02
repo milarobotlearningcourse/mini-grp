@@ -206,7 +206,7 @@ class GRP(nn.Module):
 import hydra, json
 from omegaconf import DictConfig, OmegaConf
 
-@hydra.main(config_path="conf", config_name="bridge-64-submitit")
+@hydra.main(config_path="conf", config_name="grp-mini")
 def my_main(cfg: DictConfig):
     torch.manual_seed(cfg.r_seed)
     print ("cfg:", OmegaConf.to_yaml(cfg))
@@ -277,6 +277,8 @@ def my_main(cfg: DictConfig):
 
     # create a PyTorch optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate)
+    import torch.optim.lr_scheduler as lr_scheduler
+    scheduler = lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=cfg.max_iters)
 
     # import simpler_env
     # from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
