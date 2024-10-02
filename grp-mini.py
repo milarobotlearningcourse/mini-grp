@@ -20,7 +20,6 @@ def get_batch_grp(split, dataset, batch_size):
     x_goal = torch.tensor(data["goal"][ix], dtype=torch.long)
     x_goal_img = torch.tensor(data["goal_img"][ix], dtype=torch.float)
     y = torch.tensor(data["action"][ix], dtype=torch.float)
-    # x, y = x.to(device), y.to(device)
     return x, x_goal, x_goal_img, y
 
 
@@ -43,9 +42,7 @@ def get_patches_fast(images):
     batch_size, channels, height, width = images.shape
     patch_size = height // 8 ## n_patches = 8
 
-    p = patch_size # P in maths
-
-    patches = rearrange(images, 'b (h p1) (w p2) c -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
+    patches = rearrange(images, 'b (h p1) (w p2) c -> b (h w) (p1 p2 c)', p1 = patch_size, p2 = patch_size)
     return patches
 
 def calc_positional_embeddings(sequence_length, d):
@@ -136,13 +133,11 @@ class GRP(nn.Module):
     super(GRP, self).__init__()
     self._dataset = dataset
     self._cfg = cfg
-
-    self.token_embedding_table = nn.Embedding(cfg.vocab_size, cfg.n_embd)
     self.patch_size = (self._cfg.image_shape[0] / self._cfg.n_patches, self._cfg.image_shape[1] / self._cfg.n_patches)
-
     #Positional embedding
     self.register_buffer('positional_embeddings', calc_positional_embeddings(1 + self._cfg.n_patches ** 2 + self._cfg.block_size + self._cfg.n_patches ** 2, cfg.n_embd), persistent=False)
-    
+
+    self.token_embedding_table = nn.Embedding(cfg.vocab_size, cfg.n_embd)
     self.class_tokens = nn.Parameter(torch.rand(1, cfg.n_embd))
 
     self.input_d = int(self._cfg.image_shape[2] * self.patch_size[0] * self.patch_size[1])
@@ -155,7 +150,6 @@ class GRP(nn.Module):
     # 5) Classification MLPk
     self.mlp = nn.Sequential(
         nn.Linear(self._cfg.n_embd, self._cfg.action_bins),
-        # nn.Softmax(dim=-1)
     )
 
   def _init_weights(self, module):
@@ -212,19 +206,16 @@ class GRP(nn.Module):
 import hydra, json
 from omegaconf import DictConfig, OmegaConf
 
-@hydra.main(config_path="conf", config_name="bridge-64-light")
+@hydra.main(config_path="conf", config_name="bridge-64-submitit")
 def my_main(cfg: DictConfig):
     torch.manual_seed(cfg.r_seed)
     print ("cfg:", OmegaConf.to_yaml(cfg))
-    # print (vars(cfg))
-    print (OmegaConf.to_container(cfg))
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
     cfg.device = device
     from datasets import load_dataset, load_from_disk
 
     dataset = load_dataset(cfg.dataset, split='train')
-    ## dataset = load_from_disk("datasets/mini-bridge.hf")
     print('Features:', dataset.features)
 
     dataset_tmp = {
@@ -245,8 +236,8 @@ def my_main(cfg: DictConfig):
     # create a mapping from characters to integers
     stoi = { ch:i for i,ch in enumerate(chars) }
     itos = { i:ch for i,ch in enumerate(chars) }
-    encode_txt = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list of integers
-    decode_txy = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
+    encode_txt = lambda s: [stoi[c] for c in s] # text encoder to tokens: 
+    decode_txy = lambda l: ''.join([itos[i] for i in l]) # token decoder to text: 
     print("vocab_size:", cfg.vocab_size)
     print("example text encode:", encode_txt(dataset_tmp["goal"][0]))
 
@@ -268,7 +259,6 @@ def my_main(cfg: DictConfig):
 
     print("Dataset shape:", len(dataset_tmp["img"]))
     dataset_tmp = {"train": dataset_tmp, "test": dataset_tmp} 
-    # print ("Results:", results)
     if not cfg.testing:
         import wandb
         # start a new wandb run to track this script
@@ -345,9 +335,6 @@ def my_main(cfg: DictConfig):
         loss.backward()
         optimizer.step()
 
-    # generate from the model
-    context = torch.zeros((1, 1), dtype=torch.long, device=device)
-    # print(decode(m.generate(context, max_new_tokens=2000)[0].tolist()))
     if not cfg.testing:
         wandb.finish()
     return losses['val']
