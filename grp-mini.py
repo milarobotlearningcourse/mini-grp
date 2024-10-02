@@ -206,7 +206,7 @@ class GRP(nn.Module):
 import hydra, json
 from omegaconf import DictConfig, OmegaConf
 
-@hydra.main(config_path="conf", config_name="bridge-64-submitit")
+@hydra.main(config_path="conf", config_name="bridge-64-light")
 def my_main(cfg: DictConfig):
     torch.manual_seed(cfg.r_seed)
     print ("cfg:", OmegaConf.to_yaml(cfg))
